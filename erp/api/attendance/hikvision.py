@@ -2,10 +2,10 @@
 HiVision Attendance API
 Handles real-time attendance events from HiVision Face ID devices
 
-PERFORMANCE OPTIMIZED:
-- Events được push vào Redis buffer thay vì xử lý trực tiếp
-- Batch processor xử lý hàng loạt events mỗi 5 giây
-- API response time < 100ms thay vì 2-5s
+PERFORMANCE (sau sự cố treo 16-17h 2026-08-06):
+- Mặc định: push Redis buffer rồi trả 200 — không chiếm gunicorn web worker
+- Drain: enqueue queue `short` (dedupe) + scheduler `all` backup
+- Rollback khẩn: site_config `hikvision_use_direct_processing: 1`
 """
 
 import frappe
@@ -23,11 +23,34 @@ from erp.common.doctype.erp_time_attendance.erp_time_attendance import find_or_c
 ATTENDANCE_BUFFER_KEY = "hikvision:attendance_buffer"
 # Batch size cho mỗi lần xử lý (tăng lên 200 để xử lý nhanh hơn)
 BUFFER_BATCH_SIZE = 200
+# job_id cố định — tránh spam hàng nghìn job drain lúc peak Face ID
+_BUFFER_DRAIN_JOB_ID = "hikvision_attendance_buffer_drain"
 
-# Config: Xử lý trực tiếp hay dùng buffer
-# True = xử lý ngay khi nhận event (đơn giản, realtime, không phụ thuộc scheduler)
-# False = push vào buffer, scheduler xử lý sau (response nhanh hơn nhưng có delay)
-USE_DIRECT_PROCESSING = True
+
+def _use_direct_processing():
+	"""
+	False (mặc định): buffer + worker — không block pool web lúc tan học.
+	True: xử lý sync trong request — chỉ bật tạm qua site_config khi cần debug.
+	"""
+	try:
+		return bool(frappe.conf.get("hikvision_use_direct_processing"))
+	except Exception:
+		return False
+
+
+def _enqueue_buffer_drain():
+	"""Gợi ý worker short drain buffer ngay; scheduler `all` vẫn là lớp dự phòng."""
+	try:
+		frappe.enqueue(
+			"erp.api.attendance.batch_processor.process_attendance_buffer",
+			queue="short",
+			job_id=_BUFFER_DRAIN_JOB_ID,
+			deduplicate=True,
+			timeout=300,
+		)
+	except Exception as e:
+		# Không fail request thiết bị — batch scheduler vẫn xử lý
+		get_hikvision_logger().warning("enqueue buffer drain failed: %s", e)
 
 # Sự kiện AccessController không mang mã người (VD: 1029) — thường gửi hàng loạt, chỉ cần trả 200, không spam log
 SKIP_SUB_EVENT_TYPES_NO_PERSON = frozenset({1029})
@@ -359,9 +382,9 @@ def handle_hikvision_event():
 					"timestamp": frappe.utils.now(),
 				}
 		
-		# Quyết định xử lý trực tiếp hay qua buffer
-		if USE_DIRECT_PROCESSING:
-			# XỬ LÝ TRỰC TIẾP: Đơn giản, realtime, không phụ thuộc scheduler
+		# Quyết định xử lý trực tiếp hay qua buffer (mặc định: buffer)
+		if _use_direct_processing():
+			# XỬ LÝ TRỰC TIẾP: chỉ khi site_config bật rollback
 			logger.info("DIRECT %s", event_type)
 			events_processed = 0
 			errors = []
@@ -435,8 +458,8 @@ def handle_hikvision_event():
 			return response
 		
 		else:
-			# BUFFER MODE: Push vào Redis buffer, scheduler xử lý sau
-			logger.info("BUFFER %s", event_type)
+			# BUFFER MODE: web chỉ nhận + LPUSH; worker/scheduler ghi DB + notify
+			logger.debug("BUFFER %s", event_type)
 			events_buffered = 0
 			errors = []
 			
@@ -475,7 +498,7 @@ def handle_hikvision_event():
 						"received_at": frappe.utils.now()
 					}
 					
-					# Push vào Redis buffer (O(1) operation - rất nhanh)
+					# Push vào Redis buffer (O(1) — không ghi MariaDB trên web worker)
 					push_to_attendance_buffer(buffer_event)
 					events_buffered += 1
 					
@@ -487,6 +510,10 @@ def handle_hikvision_event():
 						"post": str(post)[:200],
 						"error": str(post_error)
 					})
+
+			# Drain sớm qua short worker (dedupe); hooks scheduler `all` vẫn backup
+			if events_buffered > 0:
+				_enqueue_buffer_drain()
 			
 			# Return response sau khi buffer TẤT CẢ posts
 			response = {
