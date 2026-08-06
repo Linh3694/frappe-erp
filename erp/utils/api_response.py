@@ -36,9 +36,15 @@ def error_response(
     errors: Optional[Dict[str, List[str]]] = None,
     code: Optional[str] = None,
     debug_info: Optional[Dict[str, Any]] = None,
-    logs: Optional[List[str]] = None
+    logs: Optional[List[str]] = None,
+    data: Any = None
 ) -> Dict[str, Any]:
-    """Chuẩn hoá error response theo format cố định"""
+    """Chuẩn hoá error response theo format cố định.
+
+    `data` cho các lỗi vẫn cần trả payload kèm theo (vd bulk import: đếm số
+    thành công/thất bại, link file lỗi). Bỏ trống thì key `data` không xuất
+    hiện, giữ nguyên shape của các error response còn lại.
+    """
     response = {
         "success": False,
         "message": message
@@ -46,6 +52,9 @@ def error_response(
 
     if errors:
         response["errors"] = errors
+
+    if data is not None:
+        response["data"] = data
 
     if code:
         response["code"] = code
@@ -129,11 +138,15 @@ def list_response(
 
 def validation_error_response(
     message: str,
-    errors: Dict[str, List[str]],
+    errors: Optional[Dict[str, List[str]]] = None,
     code: str = "VALIDATION_ERROR",
-    debug_info: Dict[str, Any] = None
+    debug_info: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """Response cho validation errors"""
+    """Response cho validation errors.
+
+    `errors` là chi tiết lỗi theo từng field. Để trống khi chỉ cần một câu
+    thông báo chung — phần lớn API trong repo gọi hàm này với mỗi `message`.
+    """
     response = error_response(
         message=message,
         errors=errors,
@@ -148,12 +161,14 @@ def validation_error_response(
 
 def not_found_response(
     message: str = "Resource not found",
-    code: str = "NOT_FOUND"
+    code: str = "NOT_FOUND",
+    logs: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """Response cho resource not found"""
     return error_response(
         message=message,
-        code=code
+        code=code,
+        logs=logs
     )
 
 

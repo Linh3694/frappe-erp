@@ -543,6 +543,16 @@ def _load_subtasks(ticket_id: str) -> list:
 	return [_subtask_to_dict(r) for r in rows]
 
 
+def _has_open_subtasks(ticket_id: str) -> bool:
+	"""Còn công việc con chưa Completed/Cancelled → chưa được kết thúc ticket."""
+	return bool(
+		frappe.db.exists(
+			SUBTASK_DOCTYPE,
+			{"ticket": ticket_id, "status": ["not in", ["Completed", "Cancelled"]]},
+		)
+	)
+
+
 def _load_messages(ticket_id: str) -> list:
 	rows = frappe.get_all(
 		COMMENT_DOCTYPE,

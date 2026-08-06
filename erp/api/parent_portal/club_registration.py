@@ -33,7 +33,7 @@ from erp.sis.utils.club_registration import (
     ClubRegError,
     get_active_registrations,
     get_student_context,
-    register_student_to_clubs,
+    update_student_registrations,
 )
 from erp.utils.api_response import (
     error_response,
@@ -296,6 +296,10 @@ def _build_days(period, education_grade_id, existing, is_open):
             "is_registered": is_registered,
             "can_select": lock_reason is None,
             "lock_reason": lock_reason,
+            # Sửa được chừng nào còn trong giờ đăng ký. `registration_id` là thứ
+            # client gửi lại khi phụ huynh bỏ tick — client KHÔNG tự tra id.
+            "registration_id": prior_same_subject.name if is_registered else None,
+            "can_cancel": bool(is_registered and is_open),
             "registered_on_day": prior_same_subject.day_of_week if prior_same_subject else None,
         }
         by_day.setdefault(o.day_of_week, []).append(card)
@@ -420,7 +424,7 @@ def get_registration_data():
 
         student_id = _param("student_id") or students[0].name
         if not can_guardian_access_student(guardian, student_id, RIGHT_OPERATIONAL):
-            return forbidden_response("Bạn không có quyền đăng ký cho học sinh này")
+            return forbidden_response("Phụ huynh không có quyền đăng ký cho học sinh này")
 
         countdown = _phase_and_countdown(period)
         is_open = countdown["phase"] == "open"
@@ -638,17 +642,21 @@ def get_club_detail():
 @frappe.whitelist()
 def save_registration():
     """
-    Lưu đăng ký CLB — CỘNG THÊM và BẤT BIẾN.
+    Lưu thay đổi đăng ký CLB: thêm môn và/hoặc huỷ môn đã đăng ký.
 
-    Phụ huynh có thể lưu môn A hôm nay rồi lưu thêm môn B hôm sau, nhưng không
-    bao giờ sửa hay bỏ môn đã lưu (chỉ nhà trường mới huỷ được). Vì vậy hàm này
-    chỉ INSERT.
+    Phụ huynh sửa được CHỪNG NÀO CÒN TRONG THỜI GIAN ĐĂNG KÝ (`enforce_window`).
+    Hết giờ là chốt, muốn đổi phải nhờ nhà trường. Huỷ được cả môn do nhà trường
+    xếp, không riêng môn phụ huynh tự đăng ký.
 
-    Cho phép THÀNH CÔNG MỘT PHẦN: nếu 2/3 môn còn chỗ thì phụ huynh nhận được 2
-    môn đó thay vì trắng tay. Kết quả tách làm ba nhóm để client hiển thị đúng:
-        saved   - đã lưu
-        skipped - đã đăng ký từ trước (không phải lỗi, giúp bấm 2 lần vô hại)
-        failed  - hết chỗ / trùng thứ / không hợp lệ
+    Hai ngữ nghĩa khác nhau tuỳ lô, xem `update_student_registrations`:
+        - Lô CHỈ thêm  -> thành công một phần (2/3 môn còn chỗ thì nhận 2 môn).
+        - Lô CÓ huỷ    -> tất-cả-hoặc-không, để đổi môn hụt không mất môn cũ.
+
+    Kết quả chia nhóm cho client hiển thị:
+        cancelled - đã huỷ
+        saved     - đã đăng ký thêm
+        skipped   - đã đăng ký từ trước (không phải lỗi, bấm 2 lần vô hại)
+        failed    - hết chỗ / trùng thứ / không hợp lệ
     """
     try:
         guardian = _guardian()
@@ -662,33 +670,40 @@ def save_registration():
         period_id = data.get("period_id")
         student_id = data.get("student_id")
         offering_ids = _as_list(data.get("offering_ids"))
+        cancel_registration_ids = _as_list(data.get("cancel_registration_ids"))
 
-        if not period_id or not student_id or not offering_ids:
+        if not period_id or not student_id or not (offering_ids or cancel_registration_ids):
             return validation_error_response(
                 "Thiếu tham số",
                 {
                     "period_id": ["Bắt buộc"] if not period_id else [],
                     "student_id": ["Bắt buộc"] if not student_id else [],
-                    "offering_ids": ["Vui lòng chọn ít nhất một môn"] if not offering_ids else [],
+                    "offering_ids": (
+                        ["Vui lòng chọn ít nhất một thay đổi"]
+                        if not (offering_ids or cancel_registration_ids)
+                        else []
+                    ),
                 },
             )
 
         if not can_guardian_access_student(guardian, student_id, RIGHT_OPERATIONAL):
-            return forbidden_response("Bạn không có quyền đăng ký cho học sinh này")
+            return forbidden_response("Phụ huynh không có quyền đăng ký cho học sinh này")
 
         if not frappe.db.exists(DT_PERIOD, period_id):
             return not_found_response("Không tìm thấy đợt đăng ký")
 
         period = frappe.get_doc(DT_PERIOD, period_id)
 
-        result = register_student_to_clubs(
+        result = update_student_registrations(
             period,
             student_id,
-            offering_ids,
+            cancel_registration_ids=cancel_registration_ids,
+            offering_ids=offering_ids,
             actor_user=frappe.session.user,
             guardian=guardian,
             source="parent_portal",
             enforce_window=True,
+            reason="Phụ huynh tự huỷ trên Parent Portal",
         )
 
         result["period_id"] = period_id
@@ -697,22 +712,30 @@ def save_registration():
             _my_registrations_payload(period_id, student_id)
         )
 
-        # Chỉ coi là thất bại khi KHÔNG lưu được gì cả — lưu được một phần vẫn là
-        # thành công, client sẽ hiện toast riêng cho từng môn hỏng.
-        if not result["saved"]:
+        cancelled_count = len(result.get("cancelled") or [])
+        saved_count = len(result["saved"])
+
+        # Chỉ coi là thất bại khi KHÔNG thay đổi được gì cả. Lô chỉ-thêm có thể
+        # lưu được một phần và vẫn là thành công; lô có huỷ thì hoặc trọn vẹn,
+        # hoặc `failed` khác rỗng và không có gì được áp dụng.
+        if not saved_count and not cancelled_count:
             if result["failed"]:
                 first = result["failed"][0]
                 return error_response(
-                    first.get("message") or "Không thể đăng ký",
+                    first.get("message") or "Không thể lưu thay đổi",
                     code=first.get("code"),
                     debug_info=result,
                 )
             return success_response(
-                data=result, message="Các môn bạn chọn đều đã được đăng ký trước đó"
+                data=result, message="Các môn Phụ huynh chọn đều đã được đăng ký trước đó"
             )
 
-        saved_count = len(result["saved"])
-        message = f"Đã đăng ký thành công {saved_count} môn"
+        parts = []
+        if saved_count:
+            parts.append(f"đăng ký {saved_count} môn")
+        if cancelled_count:
+            parts.append(f"huỷ {cancelled_count} môn")
+        message = "Đã " + " và ".join(parts)
         if result["failed"]:
             message += f", {len(result['failed'])} môn không thể đăng ký"
 

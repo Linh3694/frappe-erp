@@ -54,6 +54,7 @@ def _get_class(class_id):
 			"short_title",
 			"campus_id",
 			"school_year_id",
+			"class_type",
 			"homeroom_teacher",
 			"vice_homeroom_teacher",
 		],
@@ -201,6 +202,98 @@ def get_my_class_newsfeed_access(class_id=None, school_year_id=None):
 		return error_response(
 			message=_("Không thể kiểm tra quyền bảng tin lớp"),
 			code="NEWSFEED_ACCESS_ERROR",
+		)
+
+
+def _resolve_active_school_year():
+	rows = frappe.get_all(
+		"SIS School Year",
+		filters={"is_enable": 1},
+		fields=["name"],
+		ignore_permissions=True,
+		limit=1,
+	)
+	return rows[0].get("name") if rows else None
+
+
+@frappe.whitelist(allow_guest=False, methods=["GET", "POST"])
+def get_my_newsfeed_classes(school_year_id=None):
+	"""Mọi lớp caller được đăng bài bảng tin: GVCN/phó + lớp được cấp quyền poster.
+
+	`get_my_class_newsfeed_access` chỉ trả lời cho MỘT lớp đã biết — web hỏi được vì
+	người dùng đã vào trang lớp. Mobile thì ngược lại: nó phải dựng danh sách lớp
+	TRƯỚC khi có lớp nào để hỏi, nên cần một endpoint trả thẳng danh sách. Không có
+	nó thì mobile buộc phải suy ra từ lớp chủ nhiệm và GV bộ môn rơi hết ra ngoài.
+	"""
+	try:
+		payload = _parse_payload()
+		school_year_id = school_year_id or payload.get("school_year_id")
+
+		user = frappe.session.user
+		if not user or user == "Guest":
+			return error_response(message="Vui lòng đăng nhập", code="NOT_AUTHENTICATED")
+
+		teacher_id, _user_name = _resolve_teacher_id_for_user(user)
+		if not teacher_id:
+			return success_response(data={"classes": [], "school_year_id": school_year_id or ""})
+
+		if not school_year_id:
+			school_year_id = _resolve_active_school_year()
+		year_filter = {"school_year_id": school_year_id} if school_year_id else {}
+
+		# Thứ tự quan trọng: GVCN/phó ghi trước nên `setdefault` giữ đúng vai trò mạnh
+		# hơn khi GV vừa chủ nhiệm vừa có bản ghi poster của cùng lớp.
+		roles_by_class = {}
+		for field, role in (
+			("homeroom_teacher", "homeroom"),
+			("vice_homeroom_teacher", "vice_homeroom"),
+		):
+			for row in frappe.get_all(
+				"SIS Class",
+				filters={field: teacher_id, **year_filter},
+				fields=["name"],
+				ignore_permissions=True,
+				limit_page_length=500,
+			):
+				if row.get("name"):
+					roles_by_class.setdefault(row.get("name"), role)
+
+		for row in frappe.get_all(
+			"SIS Class Newsfeed Poster",
+			filters={"teacher_id": teacher_id, **year_filter},
+			fields=["class_id"],
+			ignore_permissions=True,
+			limit_page_length=500,
+		):
+			if row.get("class_id"):
+				roles_by_class.setdefault(row.get("class_id"), "poster")
+
+		classes = []
+		for class_id, role in roles_by_class.items():
+			cls = _get_class(class_id)
+			if not cls:
+				continue
+			classes.append(
+				{
+					"classId": cls.get("name") or class_id,
+					"title": cls.get("title") or cls.get("short_title") or class_id,
+					"shortTitle": cls.get("short_title") or "",
+					"schoolYearId": cls.get("school_year_id") or school_year_id or "",
+					"campusId": cls.get("campus_id") or "",
+					"classType": cls.get("class_type") or "",
+					"role": role,
+				}
+			)
+
+		classes.sort(key=lambda c: (c.get("title") or "").lower())
+		return success_response(
+			data={"classes": classes, "school_year_id": school_year_id or ""}
+		)
+	except Exception as e:
+		frappe.logger().error(f"[NewsfeedPoster] get_my_newsfeed_classes: {e}")
+		return error_response(
+			message=_("Không thể tải danh sách lớp được đăng bài"),
+			code="NEWSFEED_MY_CLASSES_ERROR",
 		)
 
 

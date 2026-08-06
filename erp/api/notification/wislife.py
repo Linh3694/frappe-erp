@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 from erp.api.erp_sis.mobile_push_notification import send_mobile_notification, send_mobile_notifications_bulk
 from erp.common.doctype.erp_notification.erp_notification import create_notification
-from erp.api.utils import format_vietnamese_name
+from erp.api.utils import format_person_display_name, format_vietnamese_name
 
 
 # Emoji names mapping (Vietnamese)
@@ -28,6 +28,50 @@ EMOJI_NAMES = {
     'sad': 'Buồn',
     'angry': 'Phẫn nộ'
 }
+
+
+def _actor_display_name(email, raw_name, fallback="Ai đó"):
+    """
+    Tên người gây ra sự kiện, ưu tiên dựng từ first_name/last_name của doctype User.
+
+    social-service gửi kèm `userName`/`authorName` lấy từ bản mirror trong Mongo — bản đó
+    có thể còn ngược thứ tự (đồng bộ từ full_name của Frappe). Có email thì tra thẳng hai
+    cột có cấu trúc là chắc nhất; không có/không tra được mới rơi về heuristic đoán từ chuỗi.
+
+    ⚠️ format_vietnamese_name() một mình không đủ: nó chỉ nhận ra họ ở đầu hoặc cuối chuỗi
+    nên 'Hà Nguyễn Thị Việt' bị giữ nguyên (thấy 'Hà' ở đầu cũng là một họ).
+
+    Args:
+        email: Email User của người gây ra sự kiện (có thể rỗng).
+        raw_name: Tên social-service gửi sang.
+        fallback: Dùng khi không có tên nào.
+    """
+    raw = (raw_name or "").strip()
+    email = (email or "").strip().lower()
+
+    # Account PHHS: tên do ERP nhập sẵn đúng thứ tự VN — không đảo (SIS-170).
+    if email.endswith("@parent.wellspring.edu.vn"):
+        return raw or fallback
+
+    if email:
+        try:
+            row = frappe.db.get_value(
+                "User", email, ["first_name", "last_name", "full_name"], as_dict=True
+            )
+            if row:
+                resolved = format_person_display_name(
+                    row.get("first_name"),
+                    row.get("last_name"),
+                    row.get("full_name"),
+                    fallback=raw,
+                )
+                if resolved:
+                    return resolved
+        except Exception:
+            # Tên hiển thị không đáng để làm hỏng cả job gửi thông báo.
+            pass
+
+    return format_vietnamese_name(raw) if raw else fallback
 
 
 def _wislife_extra_fields(event_data):
@@ -296,10 +340,10 @@ def _do_notify_class_new_post(event_data):
         )
 
         raw_author_name = event_data.get("authorName", "Ai đó")
-        author_name = format_vietnamese_name(raw_author_name)
         post_id = event_data.get("postId")
         content_preview = (event_data.get("content", "") or "")[:50]
         author_email = (event_data.get("authorEmail") or "").strip().lower()
+        author_name = _actor_display_name(author_email, raw_author_name)
 
         class_id = event_data.get("classId") or event_data.get("class_id")
         school_year_id = event_data.get("schoolYearId") or event_data.get("school_year_id")
@@ -485,10 +529,10 @@ def _do_broadcast_new_post(event_data):
     """
     try:
         raw_author_name = event_data.get('authorName', 'Ai đó')
-        author_name = format_vietnamese_name(raw_author_name)
         post_id = event_data.get('postId')
         content_preview = event_data.get('content', '')[:50]
         author_email = (event_data.get('authorEmail') or '').strip().lower()
+        author_name = _actor_display_name(author_email, raw_author_name)
 
         frappe.logger().info(f"📱 [Wislife Broadcast Job] Starting for post by {author_name}")
 
@@ -599,7 +643,9 @@ def handle_post_tagged(event_data):
             return
 
         post_id = event_data.get('postId')
-        author_name = format_vietnamese_name(event_data.get('authorName', 'Ai đó'))
+        author_name = _actor_display_name(
+            event_data.get('authorEmail'), event_data.get('authorName', 'Ai đó')
+        )
         notification_message = f'{author_name} đã tag bạn trong một bài viết'
         extra = _wislife_extra_fields(event_data)
         push_data = {
@@ -650,9 +696,9 @@ def handle_post_reacted(event_data):
             frappe.logger().warning(f"⚠️ [Wislife Post React] No recipient email provided")
             return
             
-        # Format tên theo chuẩn Việt Nam
+        # Tên hiển thị: ưu tiên tra User theo email, đừng tin thứ tự của userName
         raw_name = event_data.get('userName', 'Ai đó')
-        user_name = format_vietnamese_name(raw_name)
+        user_name = _actor_display_name(event_data.get('userEmail'), raw_name)
         post_id = event_data.get('postId')
         extra = _wislife_extra_fields(event_data)
         
@@ -720,9 +766,9 @@ def handle_post_commented(event_data):
             frappe.logger().warning(f"⚠️ [Wislife Post Comment] No recipient email provided")
             return
             
-        # Format tên theo chuẩn Việt Nam
+        # Tên hiển thị: ưu tiên tra User theo email, đừng tin thứ tự của userName
         raw_name = event_data.get('userName', 'Ai đó')
-        user_name = format_vietnamese_name(raw_name)
+        user_name = _actor_display_name(event_data.get('userEmail'), raw_name)
         post_id = event_data.get('postId')
         extra = _wislife_extra_fields(event_data)
         
@@ -799,9 +845,9 @@ def handle_comment_replied(event_data):
         except Exception:
             pass
 
-        # Format tên theo chuẩn Việt Nam
+        # Tên hiển thị: ưu tiên tra User theo email, đừng tin thứ tự của userName
         raw_name = event_data.get('userName', 'Ai đó')
-        user_name = format_vietnamese_name(raw_name)
+        user_name = _actor_display_name(event_data.get('userEmail'), raw_name)
         post_id = event_data.get('postId')
         comment_id = event_data.get('commentId')
         extra = _wislife_extra_fields(event_data)
@@ -869,9 +915,9 @@ def handle_comment_reacted(event_data):
             frappe.logger().warning(f"⚠️ [Wislife Comment React] No recipient email provided")
             return
             
-        # Format tên theo chuẩn Việt Nam
+        # Tên hiển thị: ưu tiên tra User theo email, đừng tin thứ tự của userName
         raw_name = event_data.get('userName', 'Ai đó')
-        user_name = format_vietnamese_name(raw_name)
+        user_name = _actor_display_name(event_data.get('userEmail'), raw_name)
         post_id = event_data.get('postId')
         comment_id = event_data.get('commentId')
         extra = _wislife_extra_fields(event_data)
@@ -955,7 +1001,7 @@ def _do_handle_post_mention(event_data):
         mentioned_names = event_data.get('mentionedNames', [])
 
         raw_name = event_data.get('userName', 'Ai đó')
-        user_name = format_vietnamese_name(raw_name)
+        user_name = _actor_display_name(event_data.get('userEmail'), raw_name)
         post_id = event_data.get('postId')
         comment_id = event_data.get('commentId')
 

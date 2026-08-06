@@ -265,13 +265,19 @@ def _set_short_lock_timeout():
 # ----------------------------------------------------------------------
 
 
-def _prevalidate(period, student_id, offering_ids, enforce_window):
+def _prevalidate(period, student_id, offering_ids, enforce_window, ignore_registration_ids=None):
     """
     Trả về (offerings_by_id, student_ctx, pending_ids, skipped, failed).
 
     `skipped` là các môn học sinh đã đăng ký rồi — KHÔNG coi là lỗi, giúp thao tác
     bấm hai lần trở nên vô hại.
+
+    `ignore_registration_ids` là các đăng ký sắp bị huỷ trong CÙNG một lô sửa.
+    Không bỏ qua chúng thì mọi thao tác đổi môn đều bị chính đăng ký cũ chặn:
+    đổi Ballet(thứ 2) sang Art&Craft(thứ 2) sẽ dính DAY_TAKEN, đổi một môn sang
+    thứ khác sẽ bị coi là ALREADY_REGISTERED.
     """
+    ignore_registration_ids = set(ignore_registration_ids or [])
     skipped = []
     failed = []
 
@@ -312,7 +318,7 @@ def _prevalidate(period, student_id, offering_ids, enforce_window):
             failed.append(
                 ClubRegError(
                     "GRADE_NOT_ELIGIBLE",
-                    f"Môn «{row.title_vn}» không áp dụng cho khối của học sinh",
+                    f"Môn {row.title_vn} không áp dụng cho khối của học sinh",
                     oid,
                 ).as_dict()
             )
@@ -327,7 +333,10 @@ def _prevalidate(period, student_id, offering_ids, enforce_window):
             failed.append(
                 ClubRegError(
                     "DAY_CONFLICT_IN_REQUEST",
-                    f"Bạn đang chọn hai môn cùng {day_label(row.day_of_week)}. "
+                    # Không xưng hô: hàm này dùng chung cho cả Parent Portal lẫn
+                    # `staff_create_registration`, "Phụ huynh…" sẽ sai khi nhân
+                    # viên nhà trường đăng ký hộ.
+                    f"Đang chọn hai môn cùng {day_label(row.day_of_week)}. "
                     "Mỗi thứ chỉ được chọn một môn.",
                     oid,
                 ).as_dict()
@@ -338,7 +347,7 @@ def _prevalidate(period, student_id, offering_ids, enforce_window):
             failed.append(
                 ClubRegError(
                     "SUBJECT_CONFLICT_IN_REQUEST",
-                    f"Bạn đang chọn môn «{row.title_vn}» ở hai thứ khác nhau. "
+                    f"Môn {row.title_vn} đang được chọn ở hai thứ khác nhau. "
                     "Mỗi môn chỉ được đăng ký một lần.",
                     oid,
                 ).as_dict()
@@ -349,7 +358,11 @@ def _prevalidate(period, student_id, offering_ids, enforce_window):
         seen_subjects[row.subject_id] = oid
 
     # Đối chiếu với các đăng ký đã có.
-    existing = get_active_registrations(period.name, student_id)
+    existing = [
+        r
+        for r in get_active_registrations(period.name, student_id)
+        if r.name not in ignore_registration_ids
+    ]
     existing_subjects = {r.subject_id: r for r in existing}
     existing_days = {r.day_of_week: r for r in existing}
 
@@ -360,7 +373,7 @@ def _prevalidate(period, student_id, offering_ids, enforce_window):
                 {
                     "offering_id": oid,
                     "code": "ALREADY_REGISTERED",
-                    "message": f"Đã đăng ký môn «{row.title_vn}» "
+                    "message": f"Đã đăng ký môn {row.title_vn} "
                     f"vào {day_label(prior.day_of_week)}",
                     "registration_id": prior.name,
                 }
@@ -382,6 +395,130 @@ def _prevalidate(period, student_id, offering_ids, enforce_window):
     return offerings, student_ctx, list(offerings.keys()), skipped, failed
 
 
+def _insert_locked(
+    locked, period, student_id, student_ctx, source, actor_user, guardian, atomic
+):
+    """
+    Chèn đăng ký cho các offering ĐANG GIỮ KHOÁ.
+
+    Tách riêng để `register_student_to_clubs` và `update_student_registrations`
+    dùng chung đúng một bản kiểm slot — hai bản chép tay là hai cơ hội lệch nhau.
+    Người gọi chịu trách nhiệm khoá, savepoint ngoài và commit.
+
+    Trả về (saved, failed).
+    """
+    saved = []
+    lock_failed = []
+
+    for off in locked:
+        sp = f"club_reg_{off.name.replace('-', '_')}"
+        frappe.db.savepoint(sp)
+        try:
+            # Locking read: bắt buộc, xem docstring đầu module.
+            used = frappe.db.sql(
+                f"""
+                SELECT COUNT(*) FROM `tab{DT_REGISTRATION}`
+                WHERE offering_id = %s AND status = 'active'
+                FOR UPDATE
+                """,
+                (off.name,),
+            )[0][0]
+
+            if used >= int(off.capacity or 0):
+                raise ClubRegError(
+                    "CLUB_FULL",
+                    f"Môn {off.title_vn} đã đủ số lượng",
+                    off.name,
+                )
+
+            doc = frappe.new_doc(DT_REGISTRATION)
+            doc.update(
+                {
+                    "period_id": period.name,
+                    "offering_id": off.name,
+                    "subject_id": off.subject_id,
+                    "day_of_week": off.day_of_week,
+                    "student_id": student_id,
+                    "school_year_id": student_ctx["school_year_id"],
+                    "education_grade_id": student_ctx["education_grade_id"],
+                    "class_id": student_ctx["class_id"],
+                    "campus_id": period.campus_id,
+                    "status": "active",
+                    "source": source,
+                    "registered_by": actor_user,
+                    "registered_by_guardian": guardian,
+                    "registration_datetime": now_datetime(),
+                }
+            )
+            doc.flags.ignore_permissions = True
+            doc.insert()
+
+            frappe.db.set_value(
+                DT_OFFERING,
+                off.name,
+                "registered_count",
+                used + 1,
+                update_modified=False,
+            )
+
+            saved.append(
+                {
+                    "registration_id": doc.name,
+                    "offering_id": off.name,
+                    "subject_id": off.subject_id,
+                    "title_vn": off.title_vn,
+                    "title_en": off.title_en,
+                    "day_of_week": off.day_of_week,
+                }
+            )
+
+        except ClubRegError as e:
+            _rollback_to(sp)
+            lock_failed.append(e.as_dict())
+            if atomic:
+                raise
+        except Exception as e:
+            if _is_deadlock(e):
+                raise
+            code, msg = _classify_duplicate(e)
+            if code is None:
+                raise
+            _rollback_to(sp)
+            lock_failed.append({"offering_id": off.name, "code": code, "message": msg})
+            if atomic:
+                raise ClubRegError(code, msg, off.name)
+
+    return saved, lock_failed
+
+
+def _cancel_locked(registrations, reason, actor_user):
+    """
+    Huỷ mềm các đăng ký khi ĐANG GIỮ KHOÁ offering của chúng.
+
+    Giữ lại dòng để có vết; controller đặt `active_student_key = NULL` nên học
+    sinh đăng ký lại chính môn đó được. Người gọi lo khoá và commit.
+    """
+    cancelled = []
+    for reg in registrations:
+        doc = frappe.get_doc(DT_REGISTRATION, reg.name)
+        doc.status = "cancelled"
+        doc.cancel_reason = reason
+        doc.cancelled_by = actor_user
+        doc.cancelled_at = now_datetime()
+        doc.flags.ignore_permissions = True
+        doc.save()
+        _sync_count_locked(reg.offering_id)
+        cancelled.append(
+            {
+                "registration_id": reg.name,
+                "offering_id": reg.offering_id,
+                "subject_id": reg.subject_id,
+                "day_of_week": reg.day_of_week,
+            }
+        )
+    return cancelled
+
+
 # ----------------------------------------------------------------------
 # API chính
 # ----------------------------------------------------------------------
@@ -400,8 +537,9 @@ def register_student_to_clubs(
     """
     Đăng ký học sinh vào một hoặc nhiều môn CLB.
 
-    Ngữ nghĩa: CỘNG THÊM và BẤT BIẾN. Hàm này chỉ INSERT, không bao giờ UPDATE
-    hay DELETE dòng đã có — đó là cách "lưu rồi không sửa được" được bảo đảm.
+    Ngữ nghĩa: CHỈ CỘNG THÊM. Hàm này chỉ INSERT, không bao giờ UPDATE hay DELETE
+    dòng đã có. Muốn huỷ/đổi thì dùng `update_student_registrations` hoặc
+    `cancel_registration` — huỷ luôn là huỷ MỀM để giữ vết.
 
     Args:
         period: document SIS Club Registration Period (đã load).
@@ -436,92 +574,20 @@ def register_student_to_clubs(
     _set_short_lock_timeout()
 
     for attempt in range(MAX_LOCK_ATTEMPTS):
-        saved = []
-        lock_failed = []
         outer_sp = f"club_reg_outer_{attempt}"
         frappe.db.savepoint(outer_sp)
         try:
             locked = _lock_offerings(pending_ids)
-
-            for off in locked:
-                sp = f"club_reg_{off.name.replace('-', '_')}"
-                frappe.db.savepoint(sp)
-                try:
-                    # Locking read: bắt buộc, xem docstring đầu module.
-                    used = frappe.db.sql(
-                        f"""
-                        SELECT COUNT(*) FROM `tab{DT_REGISTRATION}`
-                        WHERE offering_id = %s AND status = 'active'
-                        FOR UPDATE
-                        """,
-                        (off.name,),
-                    )[0][0]
-
-                    if used >= int(off.capacity or 0):
-                        raise ClubRegError(
-                            "CLUB_FULL",
-                            f"Môn «{off.title_vn}» đã đủ số lượng",
-                            off.name,
-                        )
-
-                    doc = frappe.new_doc(DT_REGISTRATION)
-                    doc.update(
-                        {
-                            "period_id": period.name,
-                            "offering_id": off.name,
-                            "subject_id": off.subject_id,
-                            "day_of_week": off.day_of_week,
-                            "student_id": student_id,
-                            "school_year_id": student_ctx["school_year_id"],
-                            "education_grade_id": student_ctx["education_grade_id"],
-                            "class_id": student_ctx["class_id"],
-                            "campus_id": period.campus_id,
-                            "status": "active",
-                            "source": source,
-                            "registered_by": actor_user,
-                            "registered_by_guardian": guardian,
-                            "registration_datetime": now_datetime(),
-                        }
-                    )
-                    doc.flags.ignore_permissions = True
-                    doc.insert()
-
-                    frappe.db.set_value(
-                        DT_OFFERING,
-                        off.name,
-                        "registered_count",
-                        used + 1,
-                        update_modified=False,
-                    )
-
-                    saved.append(
-                        {
-                            "registration_id": doc.name,
-                            "offering_id": off.name,
-                            "subject_id": off.subject_id,
-                            "title_vn": off.title_vn,
-                            "title_en": off.title_en,
-                            "day_of_week": off.day_of_week,
-                        }
-                    )
-
-                except ClubRegError as e:
-                    _rollback_to(sp)
-                    lock_failed.append(e.as_dict())
-                    if atomic:
-                        raise
-                except Exception as e:
-                    if _is_deadlock(e):
-                        raise
-                    code, msg = _classify_duplicate(e)
-                    if code is None:
-                        raise
-                    _rollback_to(sp)
-                    lock_failed.append(
-                        {"offering_id": off.name, "code": code, "message": msg}
-                    )
-                    if atomic:
-                        raise ClubRegError(code, msg, off.name)
+            saved, lock_failed = _insert_locked(
+                locked,
+                period=period,
+                student_id=student_id,
+                student_ctx=student_ctx,
+                source=source,
+                actor_user=actor_user,
+                guardian=guardian,
+                atomic=atomic,
+            )
 
             frappe.db.commit()
             return {"saved": saved, "skipped": skipped, "failed": failed + lock_failed}
@@ -553,10 +619,149 @@ def register_student_to_clubs(
     )
 
 
+def update_student_registrations(
+    period,
+    student_id,
+    cancel_registration_ids=None,
+    offering_ids=None,
+    actor_user=None,
+    guardian=None,
+    source="parent_portal",
+    enforce_window=True,
+    reason=None,
+):
+    """
+    Sửa đăng ký của một học sinh: huỷ một số môn và/hoặc thêm môn mới, TRONG
+    MỘT giao dịch.
+
+    Vì sao phải chung một giao dịch (thay vì gọi cancel rồi gọi register):
+    đổi môn là "huỷ A để lấy B". Nếu huỷ A trước rồi B hết chỗ, phụ huynh mất cả
+    hai — mà B hết chỗ đúng lúc đó là chuyện thường lúc cổng mở. Ở đây B không
+    vào được thì A không bị huỷ.
+
+    Lô CHỈ thêm môn (không huỷ gì) không đi qua đây mà uỷ lại cho
+    `register_student_to_clubs`, để giữ nguyên ngữ nghĩa thành công một phần:
+    chọn 3 môn mà 1 môn hết chỗ thì vẫn nên nhận được 2 môn kia.
+
+    Returns:
+        dict {cancelled, saved, skipped, failed}. `failed` khác rỗng nghĩa là
+        KHÔNG có gì được áp dụng (đã rollback) — không phải áp dụng một phần.
+    """
+    actor_user = actor_user or frappe.session.user
+    cancel_registration_ids = [c for c in (cancel_registration_ids or []) if c]
+    offering_ids = [o for o in (offering_ids or []) if o]
+
+    if not cancel_registration_ids:
+        result = register_student_to_clubs(
+            period,
+            student_id,
+            offering_ids,
+            actor_user=actor_user,
+            guardian=guardian,
+            source=source,
+            enforce_window=enforce_window,
+        )
+        return {"cancelled": [], **result}
+
+    if period.status != "Open":
+        raise ClubRegError("PERIOD_CLOSED", "Đợt đăng ký chưa mở hoặc đã đóng")
+    if enforce_window and not period.is_within_registration_window():
+        raise ClubRegError(
+            "OUT_OF_WINDOW", "Đã hết thời gian đăng ký nên không sửa được nữa"
+        )
+
+    # Chỉ được huỷ đăng ký ĐANG hiệu lực, của ĐÚNG học sinh này, trong ĐÚNG đợt
+    # này. Thiếu bất kỳ vế nào là một phụ huynh huỷ được đăng ký của con nhà khác.
+    to_cancel = []
+    for reg_id in dict.fromkeys(cancel_registration_ids):
+        reg = frappe.db.get_value(
+            DT_REGISTRATION,
+            reg_id,
+            ["name", "offering_id", "subject_id", "day_of_week", "status", "student_id", "period_id"],
+            as_dict=True,
+        )
+        if not reg or reg.student_id != student_id or reg.period_id != period.name:
+            raise ClubRegError("REGISTRATION_NOT_FOUND", "Không tìm thấy đăng ký", reg_id)
+        if reg.status != "active":
+            raise ClubRegError("ALREADY_CANCELLED", "Đăng ký này đã được huỷ trước đó", reg_id)
+        to_cancel.append(reg)
+
+    # Lô chỉ-huỷ không cần context lớp của học sinh (mà `get_student_context` còn
+    # ném lỗi khi bé chưa xếp lớp) — bỏ tick môn cũ thì không phụ thuộc khối.
+    if offering_ids:
+        _, student_ctx, pending_ids, skipped, failed = _prevalidate(
+            period,
+            student_id,
+            offering_ids,
+            enforce_window,
+            ignore_registration_ids=[r.name for r in to_cancel],
+        )
+    else:
+        student_ctx, pending_ids, skipped, failed = None, [], [], []
+
+    # Có môn hỏng ngay từ vòng kiểm rẻ -> chưa đụng DB, dừng luôn để không huỷ
+    # nhầm môn cũ.
+    if failed:
+        return {"cancelled": [], "saved": [], "skipped": skipped, "failed": failed}
+
+    _set_short_lock_timeout()
+
+    for attempt in range(MAX_LOCK_ATTEMPTS):
+        outer_sp = f"club_upd_outer_{attempt}"
+        frappe.db.savepoint(outer_sp)
+        try:
+            # Khoá MỘT LẦN cả offering bị huỷ lẫn offering sắp thêm: cùng một tập
+            # khoá, cùng thứ tự name, nên không khoá chéo với luồng đăng ký.
+            locked = _lock_offerings([r.offering_id for r in to_cancel] + pending_ids)
+            locked_new = [off for off in locked if off.name in set(pending_ids)]
+
+            cancelled = _cancel_locked(to_cancel, reason, actor_user)
+            saved, _ = _insert_locked(
+                locked_new,
+                period=period,
+                student_id=student_id,
+                student_ctx=student_ctx,
+                source=source,
+                actor_user=actor_user,
+                guardian=guardian,
+                atomic=True,
+            )
+
+            frappe.db.commit()
+            return {
+                "cancelled": cancelled,
+                "saved": saved,
+                "skipped": skipped,
+                "failed": [],
+            }
+
+        except ClubRegError as e:
+            # Giữ nguyên hiện trạng: môn cũ không bị huỷ.
+            _rollback_to(outer_sp)
+            return {"cancelled": [], "saved": [], "skipped": skipped, "failed": [e.as_dict()]}
+        except Exception as e:
+            if _is_deadlock(e):
+                frappe.db.rollback()
+                if attempt < MAX_LOCK_ATTEMPTS - 1:
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+                raise ClubRegError(
+                    "SYSTEM_BUSY",
+                    "Hệ thống đang bận do có nhiều người đăng ký cùng lúc. "
+                    "Vui lòng thử lại sau giây lát.",
+                )
+            _rollback_to(outer_sp)
+            raise
+
+    raise ClubRegError(
+        "SYSTEM_BUSY",
+        "Hệ thống đang bận do có nhiều người đăng ký cùng lúc. Vui lòng thử lại sau giây lát.",
+    )
+
+
 def cancel_registration(registration_id, reason=None, actor_user=None):
     """
-    Nhà trường huỷ một đăng ký (van xả cho trường hợp phụ huynh bấm nhầm —
-    phụ huynh không tự sửa được).
+    Nhà trường huỷ một đăng ký.
 
     Huỷ mềm: giữ dòng để có vết, đặt `active_student_key = NULL` (controller lo)
     nên học sinh có thể đăng ký lại chính môn đó.
@@ -642,7 +847,7 @@ def move_registration(registration_id, target_offering_id, reason=None, actor_us
     if any(r.subject_id == target.subject_id for r in others):
         raise ClubRegError(
             "ALREADY_REGISTERED",
-            f"Học sinh đã đăng ký môn «{target.title_vn}» ở một thứ khác",
+            f"Học sinh đã đăng ký môn {target.title_vn} ở một thứ khác",
             target_offering_id,
         )
     if any(r.day_of_week == target.day_of_week for r in others):
@@ -668,7 +873,7 @@ def move_registration(registration_id, target_offering_id, reason=None, actor_us
         )[0][0]
         if used >= int(target.capacity or 0):
             raise ClubRegError(
-                "CLUB_FULL", f"Môn «{target.title_vn}» đã đủ số lượng", target_offering_id
+                "CLUB_FULL", f"Môn {target.title_vn} đã đủ số lượng", target_offering_id
             )
 
         doc = frappe.get_doc(DT_REGISTRATION, registration_id)

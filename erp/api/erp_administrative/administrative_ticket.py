@@ -32,7 +32,17 @@ COMMENT_DOCTYPE = "ERP Administrative Ticket Comment"
 SUBTASK_DOCTYPE = "ERP Administrative Ticket Sub Task"
 HISTORY_DOCTYPE = "ERP Administrative Ticket History"
 
-_STAFF_ROLES = ("System Manager", "SIS Administrative", "SIS BOD")
+# `Mobile Administrative` là role app WIS cấp cho nhân viên HC. Mobile đã coi role này
+# là staff (đưa thẳng vào màn Ticket Admin) nhưng trước đây backend không biết tới nó,
+# nên người chỉ có role này thấy đủ nút mà bấm gì cũng bị chặn: danh sách rỗng (403 ở
+# get_all_tickets), không nhận được ticket, và đổi trạng thái thì bị bỏ qua ÂM THẦM —
+# `update_ticket` chỉ gán status trong nhánh `if staff` nhưng vẫn trả success.
+_STAFF_ROLES = (
+    "System Manager",
+    "SIS Administrative",
+    "SIS BOD",
+    "Mobile Administrative",
+)
 
 # Sự kiện Socket.IO (frappe.publish_realtime) — trùng tên ở web + mobile
 HC_TICKET_RT_EVENT_NEW_MESSAGE = "administrative_ticket_new_message"

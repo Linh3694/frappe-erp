@@ -31,6 +31,7 @@ from erp.api.erp_it_support.utils import (
 	_can_read_ticket,
 	_can_delete_it_ticket,
 	_creator_profile_from_session,
+	_has_open_subtasks,
 	_is_it_staff,
 	_load_history,
 	_load_messages,
@@ -245,6 +246,12 @@ def update_ticket():
 		if new_status and new_status != doc.status:
 			if not is_staff:
 				return forbidden_response(_("Chỉ đội IT mới đổi trạng thái"))
+			# Không cho kết thúc ticket khi còn công việc con dở dang (huỷ ticket thì vẫn cho).
+			if new_status in ("Done", "Closed") and _has_open_subtasks(doc.name):
+				return validation_error_response(
+					_("Vui lòng hoàn thành tất cả công việc trước khi kết thúc ticket"),
+					{"status": [_("Còn công việc con chưa hoàn thành")]},
+				)
 			doc.status = new_status
 			if new_status == "Closed":
 				doc.closed_at = now_datetime()
