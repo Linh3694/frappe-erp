@@ -35,3 +35,4 @@ erp.patches.v1_0.backfill_faceid_device_remote_check
 erp.patches.v1_0.add_portal_guardian_activity_indexes
 erp.patches.v1_0.add_discipline_record_indexes
 erp.patches.v1_0.drop_mdm_enroll_token
+erp.patches.v1_0.add_student_profile_indexes
