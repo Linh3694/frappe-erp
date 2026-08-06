@@ -39,7 +39,7 @@
    "default": "image",
    "reqd": 1,
    "in_list_view": 1,
-   "description": "image: ảnh slide hiển thị carousel; slide_pdf: PDF nhúng xem trực tiếp; document: chỉ link tải về"
+   "description": "image: ảnh slide hiển thị carousel; document: chỉ link tải về. slide_pdf (PDF nhúng xem trực tiếp) đã bỏ khỏi UI — giữ trong options để không vỡ dữ liệu cũ, cả hai app đều hiển thị như document."
   },
   {
    "fieldname": "title_vn",
