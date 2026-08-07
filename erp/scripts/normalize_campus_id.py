@@ -194,30 +194,35 @@ def run(dry_run: bool = True, only: str | None = None, batch: int = BATCH, sleep
 
 	print()
 	print("### 3. Sao luu")
-	exists = frappe.db.sql("SHOW TABLES LIKE %s", (BACKUP_TABLE,))
-	if exists:
+	if not frappe.db.sql("SHOW TABLES LIKE %s", (BACKUP_TABLE,)):
+		frappe.db.sql(
+			"""
+			CREATE TABLE `%s` (
+			  dt varchar(200), docname varchar(255), old_campus varchar(255),
+			  KEY idx_dt_doc (dt, docname)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+			""" % BACKUP_TABLE
+		)
+		print("   Da tao bang `%s`" % BACKUP_TABLE)
+	else:
 		n = frappe.db.sql("SELECT COUNT(*) FROM `%s`" % BACKUP_TABLE)[0][0]
-		print("   Bang `%s` da ton tai (%d dong) — dung lai de khong ghi de." % (BACKUP_TABLE, n))
-		print("   Doi ten hoac xoa bang do roi chay lai.")
-		return
-	frappe.db.sql(
-		"""
-		CREATE TABLE `%s` (
-		  dt varchar(200), docname varchar(255), old_campus varchar(255),
-		  KEY idx_dt (dt), KEY idx_doc (docname)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-		""" % BACKUP_TABLE
-	)
+		print("   Bang `%s` da co san %d dong — se BO SUNG, khong ghi de." % (BACKUP_TABLE, n))
+
+	# Chi sao luu docname CHUA co trong bang backup. Nho vay chay lai nhieu lan van
+	# giu duoc gia tri GOC dau tien, khong bi ghi de bang gia tri da chuan hoa.
 	for t, _ in todo:
 		frappe.db.sql(
 			"""INSERT INTO `%s` (dt, docname, old_campus)
-			   SELECT %%s, name, campus_id FROM `%s`
-			   WHERE campus_id IS NULL OR campus_id='' OR campus_id<>%%s""" % (BACKUP_TABLE, t),
-			(t, TARGET),
+			   SELECT %%s, c.name, c.campus_id FROM `%s` c
+			   WHERE (c.campus_id IS NULL OR c.campus_id='' OR c.campus_id<>%%s)
+			     AND NOT EXISTS (
+			           SELECT 1 FROM `%s` b WHERE b.dt=%%s AND b.docname=c.name
+			         )""" % (BACKUP_TABLE, t, BACKUP_TABLE),
+			(t, TARGET, t),
 		)
 	frappe.db.commit()
-	print("   Da sao luu %d dong vao `%s`" % (
-		frappe.db.sql("SELECT COUNT(*) FROM `%s`" % BACKUP_TABLE)[0][0], BACKUP_TABLE))
+	print("   Tong ban ghi trong `%s`: %d" % (
+		BACKUP_TABLE, frappe.db.sql("SELECT COUNT(*) FROM `%s`" % BACKUP_TABLE)[0][0]))
 
 	print()
 	print("### 4. Chuan hoa")
