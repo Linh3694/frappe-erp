@@ -13,6 +13,10 @@ from erp.api.erp_sis.student import _get_homeroom_class_map_for_students
 # Tiêu đề thống nhất mọi push y tế (workspace-mobile)
 STANDARD_HEALTH_NOTIFICATION_TITLE = "Thông báo Y tế"
 
+# Ngưỡng escalation: HS rời lớp quá số phút này mà Y tế chưa tiếp nhận
+# Đồng bộ với frontend: src/constants/healthVisit.ts (HEALTH_VISIT_OVERDUE_MINUTES)
+HEALTH_STALE_MINUTES = 10
+
 
 # =====================================================================
 # Resolve danh sách người nhận notification
@@ -494,19 +498,19 @@ def notify_examination_created(visit_name: str, disease_classification: str = ""
 
 
 # =====================================================================
-# Scheduled job: kiểm tra visit quá 15 phút chưa chuyển trạng thái
+# Scheduled job: kiểm tra visit quá HEALTH_STALE_MINUTES phút chưa chuyển trạng thái
 # =====================================================================
 
 @frappe.whitelist(allow_guest=False)
 def check_stale_health_visits():
     """
-    Kiểm tra visit quá 15 phút chưa chuyển trạng thái.
+    Kiểm tra visit quá HEALTH_STALE_MINUTES phút chưa chuyển trạng thái.
     Gửi escalation cho Mobile Medical + Mobile Supervisory + Homeroom + Vice-homeroom + Reporter.
     (Giám thị: HS lâu chưa đến phòng Y tế — hỗ trợ tìm/điều phối trên hành lang.)
     Dùng Redis debounce để tránh gửi lặp cho cùng một visit.
 
     Được gọi bởi:
-    - Scheduled job (hooks.py) mỗi 5 phút (production)
+    - Scheduled job (hooks.py) mỗi 2 phút (production)
     - Piggyback khi load trang DailyHealth (development & production)
     - Có thể gọi thủ công qua API để test
     """
@@ -515,7 +519,7 @@ def check_stale_health_visits():
 
         frappe.logger().info("[health_notification] === BẮT ĐẦU check_stale_health_visits ===")
 
-        threshold = now_datetime() - timedelta(minutes=15)
+        threshold = now_datetime() - timedelta(minutes=HEALTH_STALE_MINUTES)
 
         stale_visits = frappe.db.sql("""
             SELECT name, student_id, student_name, class_id, class_name,
@@ -526,7 +530,7 @@ def check_stale_health_visits():
               AND creation <= %(threshold)s
         """, {"today": today(), "threshold": threshold}, as_dict=True)
 
-        frappe.logger().info(f"[health_notification] Tìm thấy {len(stale_visits) if stale_visits else 0} visit quá 15 phút (threshold={threshold})")
+        frappe.logger().info(f"[health_notification] Tìm thấy {len(stale_visits) if stale_visits else 0} visit quá {HEALTH_STALE_MINUTES} phút (threshold={threshold})")
 
         if not stale_visits:
             return
@@ -565,7 +569,7 @@ def check_stale_health_visits():
                 continue
 
             title = STANDARD_HEALTH_NOTIFICATION_TITLE
-            body = f"{label_hs} ({class_name}) đã rời lớp hơn 15 phút nhưng chưa đến phòng Y tế"
+            body = f"{label_hs} ({class_name}) đã rời lớp hơn {HEALTH_STALE_MINUTES} phút nhưng chưa đến phòng Y tế"
 
             data = {
                 "type": "health_visit_escalation",
@@ -585,7 +589,7 @@ def check_stale_health_visits():
 
             frappe.logger().info(
                 f"[health_notification] Đã gửi escalation cho visit {visit.name} - "
-                f"{student_name} (left_class > 15 phút)"
+                f"{student_name} (left_class > {HEALTH_STALE_MINUTES} phút)"
             )
 
         frappe.logger().info(f"[health_notification] === KẾT THÚC check_stale_health_visits - gửi {sent_count} escalation ===")

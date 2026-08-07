@@ -1296,6 +1296,39 @@ def _campus_title(campus_id):
 		return campus_id
 
 
+def _exclude_demo_classes(attendance_data):
+	"""
+	Loại các lớp Demo khỏi dữ liệu rồi tính lại phần tổng quan.
+
+	Chỉ dùng cho mail báo cáo — check_homeroom_attendance_status vẫn trả đủ mọi lớp.
+	So khớp không phân biệt hoa thường, lớp thiếu tên thì giữ lại (không loại nhầm).
+
+	Returns:
+		(attendance_data đã lọc, số lớp bị loại)
+	"""
+	classes = attendance_data.get('classes') or []
+	kept = [
+		c for c in classes
+		if 'demo' not in (c.get('class_name') or c.get('class_id') or '').lower()
+	]
+
+	excluded = len(classes) - len(kept)
+	if not excluded:
+		return attendance_data, 0
+
+	total = len(kept)
+	completed = sum(1 for c in kept if c.get('status') == 'completed')
+
+	return {
+		**attendance_data,
+		"classes": kept,
+		"total_classes": total,
+		"completed_classes": completed,
+		"pending_classes": total - completed,
+		"completion_percentage": round((completed / total) * 100, 1) if total else 0,
+	}, excluded
+
+
 @frappe.whitelist(allow_guest=False)
 def send_homeroom_attendance_report(date=None, campus_id=None):
 	"""
@@ -1319,6 +1352,12 @@ def send_homeroom_attendance_report(date=None, campus_id=None):
 			return error_response("Failed to check attendance status", code="CHECK_FAILED")
 
 		attendance_data = status_result['data']
+
+		# Lớp Demo không phải lớp thật — không đưa vào mail báo cáo
+		attendance_data, demo_excluded = _exclude_demo_classes(attendance_data)
+		if demo_excluded:
+			frappe.logger().info(f"🧪 Đã loại {demo_excluded} lớp Demo khỏi báo cáo ngày {date}")
+
 		report_campus_id = campus_id or attendance_data.get('campus_id')
 		campus_title = _campus_title(report_campus_id)
 

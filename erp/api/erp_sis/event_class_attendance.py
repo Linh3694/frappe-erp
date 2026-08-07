@@ -87,6 +87,67 @@ def find_overlapping_schedules(event_time_range, schedules):
     return overlapping
 
 
+def get_event_student_ids(event_id):
+    """Lấy student_id (CRM Student) của học sinh tham gia sự kiện.
+
+    SIS Event Student chỉ lưu MỘT class_student_id (một lớp bất kỳ của học sinh,
+    xem erp/api/erp_sis/event.py khi tạo Event Student). Trong khi đó một học sinh
+    có nhiều dòng SIS Class Student (lớp regular + lớp mixed/club). Vì vậy mọi chỗ
+    đối chiếu "học sinh này có tham gia sự kiện không" phải quy về student_id,
+    không được so trực tiếp class_student_id với lớp đang xem — nếu không, học sinh
+    chỉ được nhận diện ở đúng một lớp và vẫn hiện bình thường ở các lớp còn lại.
+    """
+    event_students = frappe.get_all("SIS Event Student",
+                                    filters={"event_id": event_id},
+                                    fields=["class_student_id", "status"])
+    if not event_students:
+        return []
+
+    # Ưu tiên học sinh đã duyệt; nếu chưa có ai được duyệt thì lấy tất cả
+    approved = [es for es in event_students if es.get("status") == "approved"]
+    selected = approved or event_students
+
+    class_student_ids = [es.get("class_student_id") for es in selected if es.get("class_student_id")]
+    if not class_student_ids:
+        return []
+
+    rows = frappe.get_all("SIS Class Student",
+                          filters={"name": ["in", class_student_ids]},
+                          fields=["student_id"])
+
+    student_ids = []
+    seen = set()
+    for row in rows:
+        student_id = row.get("student_id")
+        if student_id and student_id not in seen:
+            seen.add(student_id)
+            student_ids.append(student_id)
+    return student_ids
+
+
+def get_class_student_ids(class_id):
+    """Lấy danh sách student_id của một lớp."""
+    rows = frappe.get_all("SIS Class Student",
+                          filters={"class_id": class_id},
+                          fields=["student_id"])
+    return [row.get("student_id") for row in rows if row.get("student_id")]
+
+
+def get_student_class_ids(student_id):
+    """Lấy tất cả class_id mà học sinh đang thuộc về (regular + mixed + club)."""
+    rows = frappe.get_all("SIS Class Student",
+                          filters={"student_id": student_id},
+                          fields=["class_id"])
+    class_ids = []
+    seen = set()
+    for row in rows:
+        class_id = row.get("class_id")
+        if class_id and class_id not in seen:
+            seen.add(class_id)
+            class_ids.append(class_id)
+    return class_ids
+
+
 @frappe.whitelist(allow_guest=False, methods=["POST"])
 def sync_event_to_class_attendance():
     """
@@ -206,29 +267,23 @@ def sync_event_to_class_attendance():
             frappe.logger().info("✅ No overlapping schedules found")
             return success_response({"synced_count": 0}, "No overlapping periods")
 
-        # Lấy danh sách học sinh tham gia sự kiện
-        event_students = frappe.get_all("SIS Event Student",
-                                      filters={"event_id": event_id, "status": "approved"},
-                                      fields=["student_id", "student_code", "student_name"])
+        # Lấy danh sách học sinh tham gia sự kiện (SIS Event Student chỉ có
+        # class_student_id nên phải quy về student_id)
+        event_student_ids = get_event_student_ids(event_id)
 
         synced_count = 0
 
         # Với mỗi học sinh và mỗi tiết bị ảnh hưởng, cập nhật class attendance
-        for student in event_students:
-            student_id = student.get('student_id')
-            if not student_id:
-                continue
+        for student_id in event_student_ids:
+            student_info = frappe.db.get_value("CRM Student", student_id,
+                                               ["student_code", "student_name"], as_dict=True) or {}
 
-            # Tìm lớp của học sinh 
-            class_students = frappe.get_all("SIS Class Student",
-                                          filters={"student_id": student_id},
-                                          fields=["class_id"])
+            # Sự kiện áp dụng cho mọi lớp học sinh đang học (regular + mixed + club)
+            class_ids = get_student_class_ids(student_id)
 
-            if not class_students:
+            if not class_ids:
                 frappe.logger().warning(f"⚠️ No class found for student {student_id}")
                 continue
-
-            class_id = class_students[0].get('class_id')
 
             # Tìm event attendance status của học sinh này
             student_event_attendance = None
@@ -258,10 +313,36 @@ def sync_event_to_class_attendance():
                 class_status = event_status
                 remarks = f"Sự kiện: {event.title}"
 
-            # Cập nhật attendance cho tất cả các tiết bị ảnh hưởng
-            for schedule in overlapping_schedules:
-                period = schedule.get('period_name') or str(schedule.get('period_priority', ''))
+            # Xác định (lớp, tiết) mà học sinh thực sự có tiết trong TKB ở các
+            # khung giờ bị sự kiện chiếm — tránh tạo bản ghi cho lớp không có tiết
+            affected_slots = []
+            overlapping_column_ids = [s.get('name') for s in overlapping_schedules if s.get('name')]
+            if overlapping_column_ids:
+                timetable_rows = frappe.get_all("SIS Student Timetable",
+                                                filters={
+                                                    "student_id": student_id,
+                                                    "date": event_date,
+                                                    "class_id": ["in", class_ids],
+                                                    "timetable_column_id": ["in", overlapping_column_ids]
+                                                },
+                                                fields=["class_id", "timetable_column_id"])
+                period_by_column = {
+                    s.get('name'): (s.get('period_name') or str(s.get('period_priority', '')))
+                    for s in overlapping_schedules
+                }
+                for row in timetable_rows:
+                    period = period_by_column.get(row.get('timetable_column_id'))
+                    if period:
+                        affected_slots.append((row.get('class_id'), period))
 
+            if not affected_slots:
+                frappe.logger().warning(
+                    f"⚠️ No timetable slot found for student {student_id} on {event_date} in overlapping periods"
+                )
+                continue
+
+            # Cập nhật attendance cho tất cả các tiết bị ảnh hưởng
+            for class_id, period in affected_slots:
                 try:
                     # Check if record exists
                     existing = frappe.get_all("SIS Class Attendance",
@@ -285,8 +366,8 @@ def sync_event_to_class_attendance():
                         doc = frappe.get_doc({
                             "doctype": "SIS Class Attendance",
                             "student_id": student_id,
-                            "student_code": student.get('student_code'),
-                            "student_name": student.get('student_name'),
+                            "student_code": student_info.get('student_code'),
+                            "student_name": student_info.get('student_name'),
                             "class_id": class_id,
                             "date": event_date,
                             "period": period,
@@ -465,62 +546,24 @@ def get_events_by_class_period():
                         if overlap_result:
                             frappe.logger().info(f"🎯 [Backend] Event {event['name']} overlaps with period {period}")
                             
-                            # Lấy danh sách học sinh tham gia event (via class_student_id)
-                            # Try multiple filter approaches
-                            event_students = []
-                            
-                            # Get event students
+                            # Lấy danh sách học sinh tham gia event, quy về student_id
+                            # để nhận diện được ở MỌI lớp của học sinh
                             try:
-                                event_students = frappe.get_all("SIS Event Student",
-                                                               filters={"event_id": event['name']},
-                                                               fields=["class_student_id", "status"])
-                                debug_logs.append(f"🔍 [Backend] Found {len(event_students)} event students")
+                                event_student_ids = get_event_student_ids(event['name'])
+                                debug_logs.append(f"🔍 [Backend] Found {len(event_student_ids)} event students")
                             except Exception as e1:
                                 debug_logs.append(f"❌ [Backend] Error getting event students: {str(e1)}")
-                                event_students = []
-                            
-                            # Try 3: No field filter, get all and debug
-                            if not event_students:
-                                try:
-                                    all_event_students = frappe.get_all("SIS Event Student", 
-                                                                       fields=["name", "event_id", "parent", "class_student_id", "status"],
-                                                                       limit=10)
-                                    debug_logs.append(f"🔍 [Backend] Try 3 - All event students sample: {all_event_students[:3]}")
-                                except Exception as e3:
-                                    debug_logs.append(f"❌ [Backend] Try 3 failed: {str(e3)}")
-                            
-                            # Filter by status if we found students
-                            if event_students:
-                                debug_logs.append(f"🔍 [Backend] Before status filter: {len(event_students)} students")
-                                approved_students = [es for es in event_students if es.get('status') == 'approved']
-                                debug_logs.append(f"🔍 [Backend] Approved students: {len(approved_students)}")
-                                
-                                # If no approved, try all statuses
-                                if not approved_students:
-                                    debug_logs.append(f"⚠️ [Backend] No approved students, using all statuses")
-                                    event_students = [{"class_student_id": es["class_student_id"]} for es in event_students]
-                                else:
-                                    event_students = [{"class_student_id": es["class_student_id"]} for es in approved_students]
+                                event_student_ids = []
 
-                            debug_logs.append(f"🔍 [Backend] Found {len(event_students)} event students")
+                            # Lấy danh sách học sinh trong lớp đang xem
+                            class_student_ids = set(get_class_student_ids(class_id))
 
-                            # Lấy danh sách học sinh trong lớp
-                            class_students = frappe.get_all("SIS Class Student",
-                                                           filters={"class_id": class_id},
-                                                           fields=["name", "student_id"])
+                            debug_logs.append(f"🔍 [Backend] Found {len(class_student_ids)} class students")
 
-                            debug_logs.append(f"🔍 [Backend] Found {len(class_students)} class students")
-
-                            # Match event students với class students
-                            class_student_dict = {cs['name']: cs['student_id'] for cs in class_students}
-                            matching_student_ids = []
-                            
-                            for es in event_students:
-                                class_student_id = es['class_student_id']
-                                if class_student_id in class_student_dict:
-                                    student_id = class_student_dict[class_student_id]
-                                    matching_student_ids.append(student_id)
-                                    debug_logs.append(f"✅ [Backend] Matched class_student {class_student_id} → student {student_id}")
+                            # Match event students với class students theo student_id
+                            matching_student_ids = [sid for sid in event_student_ids if sid in class_student_ids]
+                            for student_id in matching_student_ids:
+                                debug_logs.append(f"✅ [Backend] Matched student {student_id} in class {class_id}")
 
                             if matching_student_ids:
                                 debug_logs.append(f"✅ [Backend] Found {len(matching_student_ids)} students from class {class_id} in event {event['name']}")
@@ -758,12 +801,9 @@ def batch_get_event_attendance():
         frappe.logger().info(f"📚 [Backend] Loaded {len(schedules)} schedules for {len(periods)} periods")
         
         # Get class students (once)
-        class_students = frappe.get_all("SIS Class Student",
-                                       filters={"class_id": class_id},
-                                       fields=["name", "student_id"])
-        class_student_dict = {cs['name']: cs['student_id'] for cs in class_students}
-        
-        frappe.logger().info(f"👥 [Backend] Class has {len(class_students)} students")
+        class_student_ids = set(get_class_student_ids(class_id))
+
+        frappe.logger().info(f"👥 [Backend] Class has {len(class_student_ids)} students")
         
         # Result structure
         result = {}
@@ -788,19 +828,12 @@ def batch_get_event_attendance():
                 if not matching_dt:
                     continue
                 
-                # Get event students (once per event)
-                event_students = frappe.get_all("SIS Event Student",
-                                               filters={"event_id": event['name']},
-                                               fields=["class_student_id", "status"])
-                
-                # Match with class students
-                matching_student_ids = []
-                for es in event_students:
-                    class_student_id = es['class_student_id']
-                    if class_student_id in class_student_dict:
-                        student_id = class_student_dict[class_student_id]
-                        matching_student_ids.append(student_id)
-                
+                # Get event students (once per event) — theo student_id
+                event_student_ids = get_event_student_ids(event['name'])
+
+                # Match with class students theo student_id
+                matching_student_ids = [sid for sid in event_student_ids if sid in class_student_ids]
+
                 if not matching_student_ids:
                     continue
                 
@@ -1170,15 +1203,10 @@ def get_events_by_date_with_attendance():
         result_events = []
         event_filter_debug = []  # Track why events are filtered out
 
-        # Get class students for filtering
-        class_students = frappe.get_all("SIS Class Student",
-                                       filters={"class_id": class_id},
-                                       fields=["name", "student_id"])
+        # Get class students for filtering (theo student_id)
+        class_student_ids = set(get_class_student_ids(class_id))
 
-        class_student_ids = [cs['name'] for cs in class_students]
-        class_student_dict = {cs['name']: cs['student_id'] for cs in class_students}
-
-        frappe.logger().info(f"👥 [Backend] Class has {len(class_students)} students")
+        frappe.logger().info(f"👥 [Backend] Class has {len(class_student_ids)} students")
 
         # Process each event
         for event in events:
@@ -1213,51 +1241,41 @@ def get_events_by_date_with_attendance():
                     event_filter_debug.append(event_debug)
                     continue  # Event doesn't happen on this date
 
-                # Get event students who belong to this class
-                event_students = frappe.get_all("SIS Event Student",
-                                               filters={"event_id": event_id},
-                                               fields=["class_student_id", "status"])
+                # Get event students who belong to this class (theo student_id)
+                event_student_ids = get_event_student_ids(event_id)
 
-                event_debug["total_event_students"] = len(event_students)
-                frappe.logger().info(f"👥 [Debug] Event {event_id} - total event_students: {len(event_students)}")
+                event_debug["total_event_students"] = len(event_student_ids)
+                frappe.logger().info(f"👥 [Debug] Event {event_id} - total event_students: {len(event_student_ids)}")
 
                 # Filter students who are in the specified class
-                class_event_students = [
-                    es for es in event_students
-                    if es['class_student_id'] in class_student_ids
-                ]
+                class_event_student_ids = [sid for sid in event_student_ids if sid in class_student_ids]
 
-                event_debug["class_event_students"] = len(class_event_students)
-                frappe.logger().info(f"✅ [Debug] Event {event_id} - class_event_students: {len(class_event_students)} (class has {len(class_student_ids)} students)")
+                event_debug["class_event_students"] = len(class_event_student_ids)
+                frappe.logger().info(f"✅ [Debug] Event {event_id} - class_event_students: {len(class_event_student_ids)} (class has {len(class_student_ids)} students)")
 
-                if not class_event_students:
-                    event_debug["reason_filtered"] = f"No students from class {class_id} (class has {len(class_student_ids)} students, event has {len(event_students)} total students)"
+                if not class_event_student_ids:
+                    event_debug["reason_filtered"] = f"No students from class {class_id} (class has {len(class_student_ids)} students, event has {len(event_student_ids)} total students)"
                     event_filter_debug.append(event_debug)
                     continue  # No students from this class participate
 
-                frappe.logger().info(f"🎯 [Backend] Found event {event_id} with {len(class_event_students)} students from class {class_id}")
+                frappe.logger().info(f"🎯 [Backend] Found event {event_id} with {len(class_event_student_ids)} students from class {class_id}")
 
                 # Get student details and attendance status
                 students_info = []
                 attended_count = 0
 
-                for es in class_event_students:
-                    student_id = class_student_dict[es['class_student_id']]
-
-                    # Get student details - try different DocTypes
+                for student_id in class_event_student_ids:
+                    # Get student details
                     try:
-                        student_doc = frappe.get_doc("SIS Student", student_id)
-                    except:
-                        try:
-                            student_doc = frappe.get_doc("CRM Student", student_id)
-                        except:
-                            # If both fail, create minimal student info
-                            student_doc = type('MockStudent', (), {
-                                'student_name': f'Student {student_id}',
-                                'student_code': student_id.split('-')[-1] if '-' in student_id else student_id,
-                                'user_image': None,
-                                'image': None
-                            })()
+                        student_doc = frappe.get_doc("CRM Student", student_id)
+                    except Exception:
+                        # If it fails, create minimal student info
+                        student_doc = type('MockStudent', (), {
+                            'student_name': f'Student {student_id}',
+                            'student_code': student_id.split('-')[-1] if '-' in student_id else student_id,
+                            'user_image': None,
+                            'image': None
+                        })()
 
                     # Get attendance status for this event on this date
                     attendance_status = frappe.db.get_value("SIS Event Attendance",

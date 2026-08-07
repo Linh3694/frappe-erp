@@ -1531,8 +1531,8 @@ scheduler_events = {
         "0 1 * * *": [
             "erp.sis.tasks.library_overdue.sync_library_overdue_job"
         ],
-        # Health Visit Escalation - Kiểm tra visit quá 15 phút chưa chuyển trạng thái (mỗi 5 phút, 7h-17h)
-        "*/5 7-17 * * 1-6": [
+        # Health Visit Escalation - Kiểm tra visit quá 10 phút chưa chuyển trạng thái (mỗi 2 phút, 7h-17h)
+        "*/2 7-17 * * 1-6": [
             "erp.api.erp_sis.daily_health_notification.check_stale_health_visits"
         ],
         # Nhắc PIC (task + công việc con) ~1 tiếng trước giờ bắt đầu sự kiện CSVC (mỗi 5 phút)
