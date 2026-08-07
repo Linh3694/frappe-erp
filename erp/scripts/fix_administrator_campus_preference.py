@@ -141,30 +141,66 @@ def run(dry_run: bool = True):
 	print("   - Sua goc: them guard Administrator vao get_current_campus_from_context (GD 2.1)")
 
 
-def _report_others():
-	"""Bao cao (chi doc) cac preference bat thuong khac — khong tu sua."""
+def _report_others(limit: int = 15):
+	"""Bao cao TONG HOP (chi doc) cac preference bat thuong khac — khong tu sua."""
 	print()
-	print("### 6. Cac preference bat thuong khac (CHI BAO CAO, khong sua)")
-	rows = frappe.db.sql(
+	print("### 6. Preference bat thuong khac (CHI BAO CAO, khong sua)")
+
+	# Tong hop theo nhom, KHONG liet ke tung dong — co the co hang tram ban ghi.
+	summary = frappe.db.sql(
 		"""
-		SELECT p.user, p.current_campus, p.default_campus
+		SELECT
+		  CASE
+		    WHEN (p.current_campus IS NULL OR p.current_campus='')
+		     AND (p.default_campus IS NULL OR p.default_campus='') THEN 'ca hai NULL'
+		    WHEN (p.current_campus IS NULL OR p.current_campus='') THEN 'chi current NULL'
+		    WHEN (p.default_campus IS NULL OR p.default_campus='') THEN 'chi default NULL'
+		    ELSE 'current <> default'
+		  END loai,
+		  CASE
+		    WHEN p.user LIKE '%%@parent.%%' THEN 'phu huynh'
+		    WHEN p.user LIKE '%%@wssg.edu.vn' OR p.user LIKE '%%@wellspringsaigon%%' THEN 'tai khoan SG'
+		    ELSE 'noi bo/hoc sinh'
+		  END nhom,
+		  COUNT(*) n
 		FROM `tabSIS User Campus Preference` p
 		WHERE p.user <> %s
 		  AND (p.current_campus IS NULL OR p.current_campus = ''
 		       OR p.default_campus IS NULL OR p.default_campus = ''
 		       OR p.current_campus <> p.default_campus)
-		ORDER BY p.user
+		GROUP BY loai, nhom ORDER BY n DESC
 		""",
 		(USER,),
 		as_dict=True,
 	)
-	if not rows:
+	if not summary:
 		print("   (khong co)")
 		return
-	for r in rows:
-		print(
-			"   %-45s current=%-14s default=%s"
-			% (r["user"], r["current_campus"] or "NULL", r["default_campus"] or "NULL")
-		)
-	print("   -> Nhung user nay se roi vao nhanh 'campus mac dinh khong xac dinh' (P1-6).")
-	print("      Xu ly o GD 0.2 cua ke hoach, khong sua o day.")
+	print("   %-20s %-18s %6s" % ("LOAI", "NHOM", "SO LUONG"))
+	for r in summary:
+		print("   %-20s %-18s %6d" % (r["loai"], r["nhom"], r["n"]))
+
+	# Chi liet ke chi tiet nhom THUC SU dang lo: current <> default (lech nhau)
+	mismatch = frappe.db.sql(
+		"""
+		SELECT p.user, p.current_campus, p.default_campus
+		FROM `tabSIS User Campus Preference` p
+		WHERE p.user <> %s
+		  AND p.current_campus IS NOT NULL AND p.current_campus <> ''
+		  AND p.default_campus IS NOT NULL AND p.default_campus <> ''
+		  AND p.current_campus <> p.default_campus
+		ORDER BY p.user LIMIT %s
+		""",
+		(USER, limit),
+		as_dict=True,
+	)
+	if mismatch:
+		print()
+		print("   Nhom 'current <> default' (dang xem campus khac campus mac dinh):")
+		for r in mismatch:
+			print("     %-45s current=%-14s default=%s" % (r["user"], r["current_campus"], r["default_campus"]))
+
+	print()
+	print("   Ghi chu: 'ca hai NULL' KHONG gay hai neu user co dung 1 role campus —")
+	print("   get_active_campus_id se bo qua preference rong va lay campus tu role.")
+	print("   Chi nguy hiem voi user da campus (xem P1-6) hoac khong co role campus nao.")
