@@ -97,6 +97,61 @@ def _affected() -> int:
 	return -1
 
 
+def _frappe_collation() -> str:
+	"""Collation mà các bảng Frappe đang dùng.
+
+	Bảng sao lưu PHẢI dùng đúng collation này, nếu không phép so `b.docname = c.name`
+	sẽ ném lỗi 1267 "Illegal mix of collations". Mặc định của `CREATE TABLE ...
+	DEFAULT CHARSET=utf8mb4` là utf8mb4_general_ci, KHÁC utf8mb4_unicode_ci của Frappe.
+	"""
+	db = frappe.conf.get("db_name")
+	row = frappe.db.sql(
+		"""SELECT COLLATION_NAME c FROM information_schema.COLUMNS
+		   WHERE TABLE_SCHEMA=%s AND TABLE_NAME='tabDocType' AND COLUMN_NAME='name'""",
+		(db,),
+		as_dict=True,
+	)
+	return (row[0]["c"] if row and row[0].get("c") else "utf8mb4_unicode_ci")
+
+
+def _ensure_backup_table():
+	"""Tạo bảng sao lưu đúng collation, hoặc sửa collation nếu bảng đã tồn tại sai."""
+	db = frappe.conf.get("db_name")
+	coll = _frappe_collation()
+	charset = coll.split("_")[0]
+
+	if not frappe.db.sql("SHOW TABLES LIKE %s", (BACKUP_TABLE,)):
+		frappe.db.sql(
+			"""
+			CREATE TABLE `%s` (
+			  dt varchar(200), docname varchar(255), old_campus varchar(255),
+			  KEY idx_dt_doc (dt, docname)
+			) ENGINE=InnoDB DEFAULT CHARSET=%s COLLATE=%s
+			""" % (BACKUP_TABLE, charset, coll)
+		)
+		print("   Da tao bang `%s` (collation %s)" % (BACKUP_TABLE, coll))
+		return
+
+	n = frappe.db.sql("SELECT COUNT(*) FROM `%s`" % BACKUP_TABLE)[0][0]
+	cur = frappe.db.sql(
+		"""SELECT COLLATION_NAME c FROM information_schema.COLUMNS
+		   WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s AND COLUMN_NAME='docname'""",
+		(db, BACKUP_TABLE),
+		as_dict=True,
+	)
+	cur_coll = cur[0]["c"] if cur else None
+	print("   Bang `%s` da co san %d dong (collation %s) — se BO SUNG, khong ghi de."
+	      % (BACKUP_TABLE, n, cur_coll))
+	if cur_coll and cur_coll != coll:
+		# Chuyen collation, GIU NGUYEN du lieu. Khong duoc xoa bang: gia tri campus_id
+		# goc cua nhung dong da chuan hoa chi con ton tai o day.
+		frappe.db.sql(
+			"ALTER TABLE `%s` CONVERT TO CHARACTER SET %s COLLATE %s" % (BACKUP_TABLE, charset, coll)
+		)
+		frappe.db.commit()
+		print("   Da chuyen collation %s -> %s (giu nguyen %d dong)" % (cur_coll, coll, n))
+
+
 def _bad_count(table: str) -> int:
 	return frappe.db.sql(
 		"SELECT COUNT(*) FROM `%s` WHERE campus_id IS NULL OR campus_id='' OR campus_id<>%%s" % table,
@@ -194,19 +249,7 @@ def run(dry_run: bool = True, only: str | None = None, batch: int = BATCH, sleep
 
 	print()
 	print("### 3. Sao luu")
-	if not frappe.db.sql("SHOW TABLES LIKE %s", (BACKUP_TABLE,)):
-		frappe.db.sql(
-			"""
-			CREATE TABLE `%s` (
-			  dt varchar(200), docname varchar(255), old_campus varchar(255),
-			  KEY idx_dt_doc (dt, docname)
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-			""" % BACKUP_TABLE
-		)
-		print("   Da tao bang `%s`" % BACKUP_TABLE)
-	else:
-		n = frappe.db.sql("SELECT COUNT(*) FROM `%s`" % BACKUP_TABLE)[0][0]
-		print("   Bang `%s` da co san %d dong — se BO SUNG, khong ghi de." % (BACKUP_TABLE, n))
+	_ensure_backup_table()
 
 	# Chi sao luu docname CHUA co trong bang backup. Nho vay chay lai nhieu lan van
 	# giu duoc gia tri GOC dau tien, khong bi ghi de bang gia tri da chuan hoa.
