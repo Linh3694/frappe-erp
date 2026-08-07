@@ -1561,6 +1561,8 @@ scheduler_events = {
         "erp.api.erp_sis.mobile_push_notification.cleanup_stale_mobile_device_tokens",
         # ERP Notification giữ 45 ngày (2026-08-07, bảng từng đạt 751k rows/750MB)
         "erp.common.notification_purge.purge_old_notifications",
+        # Version + Deleted Document giữ 90 ngày (tabVersion từng đạt 3GB/2.2M rows)
+        "erp.common.log_purge.purge_old_logs",
     ],
     # CRM Weekly - Khong co scheduler tu dong mac dinh, goi thu cong qua API
     # auto_enroll va end_of_year_transition duoc goi thu cong boi admin
