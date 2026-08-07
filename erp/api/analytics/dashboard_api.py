@@ -168,7 +168,9 @@ def get_module_usage(period="30d"):
 		return {
 			"success": True,
 			"data": stats.get("data", []),
-			"total_calls": stats.get("total_calls", 0)
+			"total_calls": stats.get("total_calls", 0),
+			# "app_event" = lượt mở màn hình thật; "api_inference" = suy từ API (nhiễu prefetch)
+			"source": stats.get("source"),
 		}
 		
 	except Exception as e:
