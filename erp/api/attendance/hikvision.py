@@ -679,6 +679,16 @@ def parse_attendance_timestamp(date_time_string, assume_device_timezone=None):
 
 def format_vn_time(dt):
 	"""Format datetime to VN timezone string for display"""
+	# None hợp lệ: check_out_time chưa có khi học sinh mới check-in buổi sáng
+	if not dt:
+		return "N/A"
+
+	# Chấp nhận cả string (VD: isoformat từ raw_data/notification payload)
+	if isinstance(dt, str):
+		dt = frappe.utils.get_datetime(dt)
+		if dt is None:
+			return "N/A"
+
 	vn_tz = pytz.timezone('Asia/Ho_Chi_Minh')
 
 	# Ensure datetime is timezone-aware
