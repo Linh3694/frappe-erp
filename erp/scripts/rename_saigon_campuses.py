@@ -35,6 +35,11 @@ from __future__ import annotations
 
 import frappe
 
+# Dùng hàm gốc, KHÔNG dùng alias `frappe.rename_doc`.
+# Alias ở frappe/__init__.py có chữ ký hẹp hơn (không nhận `ignore_permissions`)
+# và được bọc bởi lớp kiểm tra kiểu, nên truyền tham số thừa sẽ ném TypeError.
+from frappe.model.rename_doc import rename_doc as _frappe_rename_doc
+
 # (docname hiện tại, docname đích) — thứ tự theo creation
 OLD_NEW = [
 	("CAMPUS-6343158", "CAMPUS-00003"),  # Wellspring Sài Gòn
@@ -129,7 +134,14 @@ def _rename(pairs, dry_run: bool):
 		if not frappe.db.exists("SIS Campus", old):
 			continue
 		title = frappe.db.get_value("SIS Campus", old, "title_vn")
-		frappe.rename_doc("SIS Campus", old, new, force=True, ignore_permissions=True, show_alert=False)
+		_frappe_rename_doc(
+			doctype="SIS Campus",
+			old=old,
+			new=new,
+			force=True,
+			ignore_permissions=True,
+			show_alert=False,
+		)
 		frappe.db.commit()
 		print("   OK  %s -> %s   (%s)" % (old, new, title))
 
