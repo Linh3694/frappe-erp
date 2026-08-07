@@ -19,7 +19,7 @@ Created: 2026-01-28
 import frappe
 import json
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 
 class TestResult:
@@ -141,6 +141,19 @@ def test_hikvision_logic():
     except Exception as e:
         result.add_fail("is_historical_attendance", e)
     
+    # Test format_vn_time — sự cố 2026-08-07: check_out_time=None buổi sáng
+    # làm batch processor văng AttributeError trước khi enqueue notification
+    try:
+        assert format_vn_time(None) == "N/A", "format_vn_time(None) should return N/A"
+        assert format_vn_time("") == "N/A", "format_vn_time('') should return N/A"
+        naive = datetime(2026, 8, 7, 7, 30, 0)
+        assert format_vn_time(naive) == "2026-08-07 07:30:00", "naive datetime should format as-is (VN time)"
+        aware = datetime(2026, 8, 7, 0, 30, 0, tzinfo=timezone.utc)
+        assert format_vn_time(aware) == "2026-08-07 07:30:00", "UTC datetime should convert to VN time"
+        result.add_pass("format_vn_time handles None/naive/aware")
+    except Exception as e:
+        result.add_fail("format_vn_time handles None/naive/aware", e)
+
     # Test config values — mặc định buffer trừ khi site_config bật direct
     try:
         assert callable(_use_direct_processing), "_use_direct_processing should be callable"
