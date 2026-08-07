@@ -211,6 +211,11 @@ def create_project():
             )
         
         # Tạo project
+        # campus_id do client gửi có thể rỗng → rơi về campus của người tạo.
+        # Đây là endpoint người dùng gọi trực tiếp nên campus của session là đúng;
+        # với luồng chạy nền thì phải lấy theo dữ liệu, xem erp/utils/campus_document.py.
+        from erp.utils.campus_utils import get_current_campus_from_context
+
         project = frappe.get_doc({
             "doctype": "PM Project",
             "title": data.get("title"),
@@ -218,7 +223,7 @@ def create_project():
             "owner_id": user,
             "status": "active",
             "visibility": data.get("visibility", "private"),
-            "campus_id": data.get("campus_id")
+            "campus_id": data.get("campus_id") or get_current_campus_from_context()
         })
         project.insert()
         frappe.db.commit()

@@ -305,6 +305,20 @@ permission_query_conditions = {
 	"CRM PIC Config": "erp.utils.campus_permission_query.crm_pic_config_query",
 	"CRM Student": "erp.utils.campus_permission_query.crm_student_query",
 	"PM Project": "erp.utils.campus_permission_query.pm_project_query",
+	"ERP Budget Settlement": "erp.utils.campus_permission_query.erp_budget_settlement_query",
+	"ERP Budget Plan": "erp.utils.campus_permission_query.erp_budget_plan_query",
+	"ERP Purchase Request": "erp.utils.campus_permission_query.erp_purchase_request_query",
+	"ERP Purchase Order": "erp.utils.campus_permission_query.erp_purchase_order_query",
+	"ERP Organization Unit": "erp.utils.campus_permission_query.erp_organization_unit_query",
+	"FaceID Device": "erp.utils.campus_permission_query.faceid_device_query",
+	"FaceID Person": "erp.utils.campus_permission_query.faceid_person_query",
+	"FaceID Access Group": "erp.utils.campus_permission_query.faceid_access_group_query",
+	"CRM Admission Target": "erp.utils.campus_permission_query.crm_admission_target_query",
+	"SIS Knowledge Base Category": "erp.utils.campus_permission_query.sis_knowledge_base_category_query",
+	"SIS Knowledge Base Article": "erp.utils.campus_permission_query.sis_knowledge_base_article_query",
+	"SIS Class Newsfeed Poster": "erp.utils.campus_permission_query.sis_class_newsfeed_poster_query",
+	"MDM Policy": "erp.utils.campus_permission_query.mdm_policy_query",
+	"MDM Device": "erp.utils.campus_permission_query.mdm_device_query",
 }
 
 has_permission = {
@@ -492,6 +506,20 @@ has_permission = {
 	"CRM PIC Config": "erp.utils.campus_permission_query.has_campus_doctype_permission",
 	"CRM Student": "erp.utils.campus_permission_query.has_campus_doctype_permission",
 	"PM Project": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Budget Settlement": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Budget Plan": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Purchase Request": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Purchase Order": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"ERP Organization Unit": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"FaceID Device": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"FaceID Person": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"FaceID Access Group": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"CRM Admission Target": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"SIS Knowledge Base Category": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"SIS Knowledge Base Article": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"SIS Class Newsfeed Poster": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"MDM Policy": "erp.utils.campus_permission_query.has_campus_doctype_permission",
+	"MDM Device": "erp.utils.campus_permission_query.has_campus_doctype_permission",
 }
 
 # DocType Class
@@ -1079,6 +1107,7 @@ doc_events = {
 	},
 	# Mô hình nhóm quyền vào FaceID — đổi nhóm/thành viên thì tính lại desired state
 	"FaceID Access Group": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
 		"on_update": "erp.api.faceid.person_hooks.on_access_group_changed",
 	},
 	"FaceID Access Group Member": {
@@ -1262,6 +1291,44 @@ doc_events = {
 			"erp.api.erp_common_system.config.clear_bootstrap_cache",
 			"erp.api.parent_portal.module_access.clear_module_config_cache",
 		],
+	},
+	# --- Lưới an toàn campus_id (bổ sung 2026-08-07) -----------------------
+	# Các doctype có campus_id nhưng trước đây không đăng ký inject_campus_id, nên
+	# bản ghi tạo qua REST/Desk (không đi qua API riêng) bị để trống campus.
+	# LƯU Ý: hook chỉ chạy với doc.insert(); KHÔNG chạy với frappe.db.sql("INSERT ...").
+	# Xem cảnh báo đầy đủ trong erp/utils/campus_document.py.
+	"SIS Class Log Subject": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Class Log Score": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"FaceID Person": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"FaceID Device": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Organization Unit": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"PM Project": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Knowledge Base Article": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Knowledge Base Category": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"ERP Budget Plan": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Bus Transportation": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
+	},
+	"SIS Timetable Rule Set": {
+		"before_insert": "erp.utils.campus_document.inject_campus_id",
 	},
 }
 

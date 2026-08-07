@@ -288,16 +288,11 @@ def save_contact_log():
             if subject_rows:
                 default_subject_id = subject_rows[0]['name']
             else:
-                from erp.sis.utils.campus_permissions import get_current_user_campus, get_user_campuses
-                campus_id = None
-                try:
-                    campus_id = get_current_user_campus()
-                    if not campus_id:
-                        campuses = get_user_campuses(frappe.session.user)
-                        campus_id = campuses[0] if campuses else None
-                except Exception:
-                    pass
-                
+                # Campus lấy theo LỚP, không theo session: session có thể chưa có campus
+                # (trả None -> dòng NULL) hoặc là Administrator, khi đó
+                # get_user_campuses()[0] trả campus tuỳ ý theo thứ tự `modified desc`.
+                campus_id = frappe.db.get_value("SIS Class", class_id, "campus_id") if class_id else None
+
                 subject_doc = frappe.get_doc({
                     "doctype": "SIS Class Log Subject",
                     "timetable_instance_id": timetable_instance,
@@ -325,6 +320,9 @@ def save_contact_log():
                 "subject_id": default_subject_id,
                 "now": now,
                 "user": user,
+                # Bulk INSERT bỏ qua doc_events → phải set campus_id tường minh.
+                # Lấy theo lớp (nguồn dữ liệu) thay vì theo session.
+                "campus": frappe.db.get_value("SIS Class", class_id, "campus_id") if class_id else None,
             }
             row_idx = 0
             for (student_id, badges, comment) in students_to_create:
@@ -348,6 +346,7 @@ def save_contact_log():
                 insert_rows.append(
                     f"(%(name_{row_idx})s, %(subject_id)s, %(sid_{row_idx})s, %(csid_{row_idx})s, "
                     f"%(badges_{row_idx})s, %(comment_{row_idx})s, 'Draft', "
+                    f"%(campus)s, "
                     f"%(now)s, %(now)s, %(user)s, %(user)s, 0)"
                 )
                 log_ids[student_id] = name_val
@@ -360,6 +359,7 @@ def save_contact_log():
                     INSERT INTO `tabSIS Class Log Student`
                         (name, subject_id, student_id, class_student_id,
                          badges, contact_log_comment, contact_log_status,
+                         campus_id,
                          creation, modified, owner, modified_by, docstatus)
                     VALUES {', '.join(insert_rows)}
                     """,

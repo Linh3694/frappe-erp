@@ -41,6 +41,26 @@ jobs:
         run: |
           python -m py_compile erp/**/*.py || true
 
+  campus-isolation:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+
+      # Hai script dưới đọc file trên đĩa, KHÔNG cần frappe/DB nên chạy được trong CI.
+      # Lý do tồn tại: xem CLAUDE.md mục 1.
+      - name: "Campus: doctype có campus_id phải đăng ký hooks"
+        run: python3 erp/scripts/check_campus_doctype_hooks.py
+
+      - name: "Campus: INSERT thô phải có campus_id"
+        run: python3 erp/scripts/lint_campus_raw_insert.py
+
   validate-frappe-app:
     runs-on: ubuntu-latest
 

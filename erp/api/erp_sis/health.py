@@ -370,20 +370,24 @@ def create_health_report():
         report_name = frappe.generate_hash("SIS Health Report", 10)
         report_date = today()
         
+        # INSERT thẳng bỏ qua doc_events nên campus_id phải set tường minh —
+        # hook inject_campus_id không chạy. Lấy theo lớp, không theo session.
+        report_campus_id = frappe.db.get_value("SIS Class", class_id, "campus_id") if class_id else None
+
         frappe.db.sql("""
-            INSERT INTO `tabSIS Health Report` 
+            INSERT INTO `tabSIS Health Report`
             (name, creation, modified, modified_by, owner, docstatus,
              student_id, student_name, student_code, class_id, class_name,
-             description, porridge_registration, porridge_note, report_date, 
-             created_by_user, created_by_name)
+             description, porridge_registration, porridge_note, report_date,
+             created_by_user, created_by_name, campus_id)
             VALUES (%s, NOW(), NOW(), %s, %s, 0,
                     %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s, %s)
         """, (
             report_name, frappe.session.user, frappe.session.user,
             student_id, student_name, student_code, class_id, class_name,
             description, 1 if porridge_registration else 0, porridge_note or "", report_date,
-            created_by_user, created_by_name
+            created_by_user, created_by_name, report_campus_id
         ))
         
         # Thêm porridge_dates

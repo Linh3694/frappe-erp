@@ -30,7 +30,9 @@ from erp.api.attendance.hikvision import (
 	get_buffer_length,
 	parse_attendance_timestamp,
 	format_vn_time,
-	get_hikvision_logger
+	get_hikvision_logger,
+	_increment_daily_counter,
+	INVALID_TIME_PERIOD_SUB_EVENT,
 )
 from erp.common.doctype.erp_time_attendance.erp_time_attendance import (
 	find_or_create_day_record,
@@ -131,7 +133,9 @@ def process_attendance_buffer():
 					result = process_employee_events(key, employee_events, logger, existing_name=existing_name)
 					
 					if result.get("success"):
-						if result.get("is_new"):
+						if result.get("skipped_denied"):
+							pass  # toàn bộ event của nhóm bị chặn tại cổng — không có record nào ghi
+						elif result.get("is_new"):
 							records_processed += 1
 						else:
 							records_updated += 1
@@ -293,7 +297,24 @@ def process_employee_events(key, events, logger, existing_name=None):
 		Dict with processing result
 	"""
 	employee_code, date_str = key
-	
+
+	# subEventType = 7 (Invalid Time Period): thiết bị ĐÃ TỪ CHỐI mở cửa — người quẹt
+	# không đi qua cổng. Chỉ các cổng đã cấu hình đúng khung giờ mới trả 7; học sinh
+	# đi muộn/về sớm dùng cổng riêng không cài giờ (không bao giờ trả 7). Vì vậy loại
+	# hẳn các event này: không ghi check_in/check_out, không báo phụ huynh.
+	# (Chính sách 2026-08-07 — thay fix 2026-08-03 vốn ra đời khi chưa có cổng riêng;
+	# trước đó từng có PH nhận noti "con đã đi qua cổng" trong khi con bị chặn ở cổng ra.)
+	denied_events = [e for e in events if e.get("sub_event_type") == INVALID_TIME_PERIOD_SUB_EVENT]
+	if denied_events:
+		events = [e for e in events if e.get("sub_event_type") != INVALID_TIME_PERIOD_SUB_EVENT]
+		_increment_daily_counter("attendance:invalid_time_period:count")
+		logger.info(
+			f"⛔ {employee_code}: {len(denied_events)} event subEvent=7 (bị chặn tại cổng) - "
+			f"bỏ qua, không ghi điểm danh, không gửi notification"
+		)
+	if not events:
+		return {"success": True, "skipped_denied": True, "should_notify": False}
+
 	# Lấy thông tin từ event đầu tiên (hoặc merge từ tất cả)
 	first_event = events[0]
 	employee_name = None
@@ -376,18 +397,8 @@ def process_employee_events(key, events, logger, existing_name=None):
 		
 		# Determine if should send notification
 		latest_timestamp = sorted_events[-1].get("parsed_timestamp")
-		
-		# Trước đây bỏ notification khi có event subEventType = 7 (Invalid Time Period).
-		# Bản ghi điểm danh đã được lưu nên vẫn phải thông báo — giữ khớp với hikvision.py.
-		INVALID_TIME_PERIOD_SUB_EVENT = 7
-		has_invalid_time_period = any(
-			evt.get("sub_event_type") == INVALID_TIME_PERIOD_SUB_EVENT
-			for evt in events
-		)
 
-		if has_invalid_time_period:
-			logger.info(f"invalid time period subEvent=7 for {employee_code} - van gui notification")
-
+		# Event subEvent=7 đã bị loại từ đầu hàm — tới đây chỉ còn lần quẹt hợp lệ.
 		# Luôn enqueue notification; worker quyết định skip push nếu event stale
 		notification_data = {
 			"employee_code": employee_code,

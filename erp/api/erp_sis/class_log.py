@@ -634,15 +634,10 @@ def get_class_log(timetable_instance=None, class_id=None, date=None, period=None
             # Resolve class from instance
             inst = frappe.get_doc("SIS Timetable Instance", timetable_instance)
             class_id = inst.class_id
-            from erp.sis.utils.campus_permissions import get_current_user_campus, get_user_campuses
-            campus_id = None
-            try:
-                campus_id = get_current_user_campus()
-                if not campus_id:
-                    campuses = get_user_campuses(frappe.session.user)
-                    campus_id = campuses[0] if campuses else None
-            except Exception:
-                pass
+            # Campus lấy theo LỚP, không theo session: hàm này chạy được cả khi
+            # session chưa có campus (trả None -> dòng NULL) hoặc là Administrator
+            # (get_user_campuses()[0] trả campus tuỳ ý theo thứ tự `modified desc`).
+            campus_id = frappe.db.get_value("SIS Class", class_id, "campus_id") if class_id else None
             doc = frappe.get_doc({
                 "doctype": "SIS Class Log Subject",
                 "timetable_instance_id": timetable_instance,
@@ -773,15 +768,8 @@ def save_class_log():
         else:
             inst = frappe.get_doc("SIS Timetable Instance", timetable_instance)
             class_id = inst.class_id
-            from erp.sis.utils.campus_permissions import get_current_user_campus, get_user_campuses
-            campus_id = None
-            try:
-                campus_id = get_current_user_campus()
-                if not campus_id:
-                    campuses = get_user_campuses(frappe.session.user)
-                    campus_id = campuses[0] if campuses else None
-            except Exception:
-                pass
+            # Campus theo LỚP — xem ghi chú ở get_class_log.
+            campus_id = frappe.db.get_value("SIS Class", class_id, "campus_id") if class_id else None
             doc = frappe.get_doc({
                 "doctype": "SIS Class Log Subject",
                 "timetable_instance_id": timetable_instance,
@@ -870,14 +858,17 @@ def save_class_log():
         timings_ms["bulk_update"] = round((time.perf_counter() - t_mark) * 1000)
 
         # ⚡ Bulk INSERT 1 query thay vì N × frappe.get_doc + insert (~100-300ms/record)
-        # SIS Class Log Student không có hooks quan trọng → bypass doc.insert() an toàn
+        # Bulk INSERT bỏ qua doc_events, nên campus_id PHẢI được set tường minh ở đây —
+        # hook before_insert/inject_campus_id không chạy. Lấy campus từ lớp thay vì từ
+        # session: nguồn theo dữ liệu luôn đúng, kể cả khi chạy dưới job nền.
         t_mark = time.perf_counter()
         inserted = 0
         if pending_insert_by_student:
             now_dt = frappe.utils.now_datetime()
             user_email = frappe.session.user
+            row_campus_id = frappe.db.get_value("SIS Class", class_id, "campus_id") if class_id else None
             insert_rows_sql = []
-            insert_params = {"now": now_dt, "user": user_email}
+            insert_params = {"now": now_dt, "user": user_email, "campus": row_campus_id}
 
             for idx, values in enumerate(pending_insert_by_student.values()):
                 name_val = f"SIS-CLS-LOG-STU-{frappe.generate_hash(length=10).upper()}"
@@ -909,6 +900,7 @@ def save_class_log():
                     f"(%({p_name})s, %({p_sub})s, %({p_sid})s, %({p_csid})s, "
                     f"%({p_hw})s, %({p_be})s, %({p_pa})s, %({p_is})s, "
                     f"%({p_top})s, %({p_cm})s, %({p_val})s, "
+                    f"%(campus)s, "
                     f"%(now)s, %(now)s, %(user)s, %(user)s, 0)"
                 )
                 inserted += 1
@@ -919,6 +911,7 @@ def save_class_log():
                     (name, subject_id, student_id, class_student_id,
                      homework, behavior, participation, issues,
                      is_top_performance, specific_comment, value,
+                     campus_id,
                      creation, modified, owner, modified_by, docstatus)
                 VALUES {', '.join(insert_rows_sql)}
                 """,
