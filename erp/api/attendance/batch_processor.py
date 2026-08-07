@@ -24,6 +24,8 @@ import os
 from erp.api.attendance.hikvision import (
 	ATTENDANCE_BUFFER_KEY,
 	BUFFER_BATCH_SIZE,
+	_buffer_key,
+	_buffer_redis,
 	pop_from_attendance_buffer,
 	get_buffer_length,
 	parse_attendance_timestamp,
@@ -466,13 +468,14 @@ def get_processor_stats():
 		buffer_length = get_buffer_length()
 		
 		# Peek event cuối Redis list (FIFO: rpop pull từ tail nên LINDEX -1 là event cũ nhất)
+		# Trước 2026-08-07 chỗ này lindex key KHÔNG prefix qua raw cache.redis nên
+		# luôn trả None (key thật có prefix site) — oldest_event_age chưa từng chạy.
 		oldest_event_age_seconds = None
 		oldest_event_received_at = None
 		try:
-			cache = frappe.cache()
-			redis_conn = cache.redis if hasattr(cache, 'redis') else None
+			redis_conn = _buffer_redis()
 			if redis_conn:
-				oldest_event_json = redis_conn.lindex(ATTENDANCE_BUFFER_KEY, -1)
+				oldest_event_json = redis_conn.lindex(_buffer_key(), -1)
 				if oldest_event_json:
 					if isinstance(oldest_event_json, bytes):
 						oldest_event_json = oldest_event_json.decode('utf-8')
@@ -548,16 +551,10 @@ def clear_buffer():
 		frappe.throw(_("Not permitted"), frappe.PermissionError)
 	
 	try:
-		cache = frappe.cache()
-		
-		# Delete the buffer key
-		if hasattr(cache, 'delete_value'):
-			cache.delete_value(ATTENDANCE_BUFFER_KEY)
-		else:
-			redis_conn = cache.redis if hasattr(cache, 'redis') else None
-			if redis_conn:
-				redis_conn.delete(ATTENDANCE_BUFFER_KEY)
-		
+		# Xoá cả key mới (queue db1) lẫn key cũ (cache db0, giai đoạn chuyển giao)
+		_buffer_redis().delete(_buffer_key())
+		frappe.cache().delete_value(ATTENDANCE_BUFFER_KEY)
+
 		return {
 			"status": "success",
 			"message": "Buffer cleared",
