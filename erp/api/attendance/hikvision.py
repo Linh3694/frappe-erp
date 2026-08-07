@@ -775,6 +775,52 @@ def is_historical_attendance(attendance_timestamp, threshold_minutes=None):
 # REDIS BUFFER FUNCTIONS - Performance optimization cho giờ tan học
 # ============================================================================
 
+_BUFFER_REDIS = None
+
+
+def _buffer_redis():
+	"""
+	Kết nối Redis QUEUE (db1) cho buffer điểm danh.
+
+	Chuyển khỏi frappe.cache() (db0) từ 2026-08-07: `bench migrate` /
+	`bench clear-cache` flush db0 nên có thể nuốt event đang chờ đúng lúc deploy.
+	db1 là nhà của RQ — noeviction, không bị flush theo cache.
+
+	Lazy init để connection pool được tạo SAU khi gunicorn fork (--preload).
+	"""
+	global _BUFFER_REDIS
+	if _BUFFER_REDIS is None:
+		import redis
+		_BUFFER_REDIS = redis.from_url(frappe.conf.redis_queue)
+	return _BUFFER_REDIS
+
+
+def _buffer_key():
+	"""Key theo site — giữ ngữ nghĩa prefix `<site>|<key>` như frappe.cache() cũ."""
+	return f"{frappe.local.site}|{ATTENDANCE_BUFFER_KEY}"
+
+
+def _pop_legacy_cache_buffer(count):
+	"""
+	Vét buffer CŨ còn sót ở redis cache (db0) trong giai đoạn chuyển giao —
+	web worker chưa restart vẫn đẩy vào chỗ cũ vài giây. Trả rỗng là hết nợ;
+	sau vài ngày ổn định có thể gỡ (chi phí giữ lại: 1 lệnh RPOP trả None/batch).
+	"""
+	events = []
+	try:
+		cache = frappe.cache()
+		for _ in range(count):
+			event_json = cache.rpop(ATTENDANCE_BUFFER_KEY)
+			if not event_json:
+				break
+			if isinstance(event_json, bytes):
+				event_json = event_json.decode('utf-8')
+			events.append(json.loads(event_json))
+	except Exception as e:
+		get_hikvision_logger().warning(f"legacy buffer pop failed: {e}")
+	return events
+
+
 def push_to_attendance_buffer(event_data):
 	"""
 	Push attendance event vào Redis buffer để xử lý batch sau.
@@ -795,28 +841,12 @@ def push_to_attendance_buffer(event_data):
 	try:
 		# Serialize event data to JSON
 		event_json = json.dumps(event_data, default=str)
-		
-		# Push vào Redis list (LPUSH - O(1))
-		# Sử dụng frappe.cache() để lấy Redis connection
-		cache = frappe.cache()
-		
-		# Dùng lpush để thêm vào đầu list
-		# Batch processor sẽ dùng rpop để lấy từ cuối (FIFO order)
-		if hasattr(cache, 'lpush'):
-			cache.lpush(ATTENDANCE_BUFFER_KEY, event_json)
-		else:
-			# Fallback: dùng Redis connection trực tiếp
-			redis_conn = cache.redis if hasattr(cache, 'redis') else None
-			if redis_conn:
-				redis_conn.lpush(ATTENDANCE_BUFFER_KEY, event_json)
-			else:
-				# Last fallback: xử lý synchronous nếu không có Redis
-				get_hikvision_logger().warning("⚠️ Redis not available, falling back to sync processing")
-				process_single_attendance_event(event_data)
-				return
-		
+
+		# LPUSH vào redis queue (db1); batch processor RPOP từ cuối (FIFO)
+		_buffer_redis().lpush(_buffer_key(), event_json)
+
 		get_hikvision_logger().debug(f"📥 Event pushed to buffer: {event_data.get('employee_code')}")
-		
+
 	except Exception as e:
 		get_hikvision_logger().error(f"❌ Failed to push to buffer: {str(e)}")
 		# Fallback: xử lý synchronous nếu push fail
@@ -824,16 +854,14 @@ def push_to_attendance_buffer(event_data):
 
 
 def get_buffer_length():
-	"""Lấy số lượng events đang chờ trong buffer"""
+	"""Lấy số lượng events đang chờ trong buffer (gồm cả key cũ chưa vét hết)"""
 	try:
-		cache = frappe.cache()
-		if hasattr(cache, 'llen'):
-			return cache.llen(ATTENDANCE_BUFFER_KEY) or 0
-		else:
-			redis_conn = cache.redis if hasattr(cache, 'redis') else None
-			if redis_conn:
-				return redis_conn.llen(ATTENDANCE_BUFFER_KEY) or 0
-		return 0
+		length = _buffer_redis().llen(_buffer_key()) or 0
+		try:
+			length += frappe.cache().llen(ATTENDANCE_BUFFER_KEY) or 0
+		except Exception:
+			pass
+		return length
 	except Exception:
 		return 0
 
@@ -853,32 +881,22 @@ def pop_from_attendance_buffer(count=None):
 	
 	events = []
 	try:
-		cache = frappe.cache()
-		redis_conn = None
-		
-		if hasattr(cache, 'rpop'):
-			# Dùng frappe.cache() methods
-			for _ in range(count):
-				event_json = cache.rpop(ATTENDANCE_BUFFER_KEY)
-				if not event_json:
-					break
-				if isinstance(event_json, bytes):
-					event_json = event_json.decode('utf-8')
-				events.append(json.loads(event_json))
-		else:
-			# Dùng Redis connection trực tiếp
-			redis_conn = cache.redis if hasattr(cache, 'redis') else None
-			if redis_conn:
-				for _ in range(count):
-					event_json = redis_conn.rpop(ATTENDANCE_BUFFER_KEY)
-					if not event_json:
-						break
-					if isinstance(event_json, bytes):
-						event_json = event_json.decode('utf-8')
-					events.append(json.loads(event_json))
-		
+		conn = _buffer_redis()
+		key = _buffer_key()
+		for _ in range(count):
+			event_json = conn.rpop(key)
+			if not event_json:
+				break
+			if isinstance(event_json, bytes):
+				event_json = event_json.decode('utf-8')
+			events.append(json.loads(event_json))
+
+		# Giai đoạn chuyển giao db0 -> db1: vét nốt key cũ nếu batch còn chỗ
+		if len(events) < count:
+			events.extend(_pop_legacy_cache_buffer(count - len(events)))
+
 		return events
-		
+
 	except Exception as e:
 		get_hikvision_logger().error(f"❌ Failed to pop from buffer: {str(e)}")
 		return events
