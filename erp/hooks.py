@@ -1559,6 +1559,8 @@ scheduler_events = {
         "erp.api.parent_portal.push_notification.cleanup_stale_push_subscriptions",
         # Mobile Device Token (Expo) - deactivate token last_seen quá 90 ngày, xóa inactive quá 30 ngày
         "erp.api.erp_sis.mobile_push_notification.cleanup_stale_mobile_device_tokens",
+        # ERP Notification giữ 45 ngày (2026-08-07, bảng từng đạt 751k rows/750MB)
+        "erp.common.notification_purge.purge_old_notifications",
     ],
     # CRM Weekly - Khong co scheduler tu dong mac dinh, goi thu cong qua API
     # auto_enroll va end_of_year_transition duoc goi thu cong boi admin
