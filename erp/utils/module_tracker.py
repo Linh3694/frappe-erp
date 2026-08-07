@@ -17,6 +17,31 @@ from functools import wraps
 # Chỉ ghi DB tối đa 1 lần / guardian+module trong cửa sổ này (giây)
 _DEBOUNCE_SECONDS = 900  # 15 phút — đủ cho analytics module usage
 
+# Các endpoint app TỰ GỌI lúc mở màn hình chính / splash (đối chiếu trực tiếp
+# code parent-portal-mobile: dashboardSplashLoad.ts + dashboardHomeQueries.ts
+# + các card trên app/(tabs)/index.tsx, rà 2026-08-07). Gọi tự động = không
+# phải hành vi quan tâm — đếm vào là mọi guardian "vào" đủ 8 module mỗi ngày
+# (Học bổng ~30k lượt x ~1125 người/30 ngày dù không ai bấm).
+PREFETCH_ENDPOINT_EXCLUDE = frozenset({
+    "news.get_published_news_articles",       # NewsCard (Thông báo)
+    "daily_menu.get_daily_menu_by_date",      # MenuCard (Thực đơn)
+    "re_enrollment.get_active_config",        # ReEnrollmentCTA (Tái tuyển sinh)
+    "scholarship.get_active_period",          # ScholarshipCTA (Học bổng)
+    "attendance.query.get_students_day_map",  # StudentCard (Điểm danh)
+    "timetable.get_student_timetable_today",  # TimetableCard/splash (TKB)
+    "timetable.get_student_timetable_week",   # splash prefetch (TKB)
+    "timetable.get_teacher_info",             # splash prefetch (TKB)
+    "calendar.get_calendar_events",           # splash getHolidays (Lịch học)
+    "interface.get_active_interface",         # splash (Thông tin HS)
+})
+
+
+def _is_prefetch_endpoint(request_path):
+    """True nếu request là prefetch tự động của app — bỏ qua khi suy hành vi."""
+    if not request_path:
+        return False
+    return any(suffix in request_path for suffix in PREFETCH_ENDPOINT_EXCLUDE)
+
 # Mapping API endpoints → Module names
 # Thứ tự quan trọng: keywords cụ thể hơn phải đặt trước
 API_MODULE_MAPPING = {
@@ -226,9 +251,10 @@ def track_module_usage(func):
             guardian_name = get_current_guardian_from_session()
             if guardian_name:
                 endpoint = frappe.request.path if frappe.request else func.__name__
-                module_name = detect_module_from_endpoint(endpoint)
-                if module_name:
-                    record_module_usage(guardian_name, module_name)
+                if not _is_prefetch_endpoint(endpoint):
+                    module_name = detect_module_from_endpoint(endpoint)
+                    if module_name:
+                        record_module_usage(guardian_name, module_name)
         except Exception as e:
             frappe.log_error(f"Module tracking error: {str(e)}", "Module Tracker")
 
@@ -251,6 +277,10 @@ def track_request_module_usage():
 
         request_path = frappe.request.path or ''
         if 'parent_portal' not in request_path and 'attendance' not in request_path:
+            return
+
+        # Prefetch tự động của app không phản ánh sự quan tâm — bỏ qua
+        if _is_prefetch_endpoint(request_path):
             return
 
         module_name = detect_module_from_endpoint(request_path)
