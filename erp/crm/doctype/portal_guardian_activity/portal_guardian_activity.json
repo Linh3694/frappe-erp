@@ -23,7 +23,8 @@
   "column_break_1",
   "activity_type",
   "activity_count",
-  "last_activity_at"
+  "last_activity_at",
+  "tracking_source"
  ],
  "fields": [
   {
@@ -82,6 +83,14 @@
    "fieldtype": "Datetime",
    "label": "Last Activity At",
    "in_list_view": 1
+  },
+  {
+   "default": "api_inference",
+   "description": "api_inference: suy từ endpoint (nhiễu prefetch); app_event: app gửi event mở màn hình (chính xác)",
+   "fieldname": "tracking_source",
+   "fieldtype": "Select",
+   "label": "Tracking Source",
+   "options": "api_inference\napp_event"
   }
  ],
  "index_web_pages_for_search": 0,
