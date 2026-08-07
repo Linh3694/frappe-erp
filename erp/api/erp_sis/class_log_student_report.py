@@ -1,6 +1,6 @@
 """
-Class Log Student Report API
-Báo cáo dữ liệu học sinh theo khoảng thời gian, tổng hợp từ những gì GVBM đã nhập trong sổ đầu bài.
+Class Log Student Report API — phục vụ trang "Nhật ký học tập" (mục Báo cáo)
+Tổng hợp dữ liệu học sinh theo khoảng thời gian, từ những gì GVBM đã nhập trong sổ đầu bài.
 
 Nguồn dữ liệu:
 - SIS Class Log Subject  : mỗi tiết học (ngày, tiết, lớp, điểm tiết, nhận xét chung)
@@ -33,10 +33,11 @@ SCORED_TYPES = ("homework", "behavior", "participation")
 # Trạng thái điểm danh theo tiết
 ATTENDANCE_STATUSES = ("present", "late", "absent", "excused")
 
-# Trần độ dài khoảng ngày. Kèm nhật ký chi tiết thì payload phình theo (HS × tiết),
-# nên siết chặt hơn để không nghẽn gateway.
-MAX_RANGE_DAYS = 186
-MAX_RANGE_DAYS_WITH_DETAILS = 62
+# Trần độ dài khoảng ngày — đủ phủ trọn một năm học, chỉ là chốt chặn chống truy vấn
+# vô hạn do tham số hỏng. Phạm vi thật đã bị năm học bó ở tầng UI.
+# Khi kèm nhật ký chi tiết, FE gọi theo từng đoạn ngắn rồi gộp (xem classLogStudentReportExport)
+# nên không cần trần riêng cho include_details.
+MAX_RANGE_DAYS = 400
 
 
 def _arg(value, key):
@@ -73,7 +74,7 @@ class _RangeError(Exception):
         self.code = code
 
 
-def _resolve_range(year, month, date_from, date_to, include_details):
+def _resolve_range(year, month, date_from, date_to):
     """
     Chốt khoảng thời gian của báo cáo. Ưu tiên date_from/date_to nếu có đủ đôi,
     ngược lại dùng preset year+month. Trả về (date_from, date_to, mode).
@@ -85,10 +86,8 @@ def _resolve_range(year, month, date_from, date_to, include_details):
         end = frappe.utils.getdate(date_to)
         if start > end:
             raise _RangeError("date_from phải trước hoặc trùng date_to")
-        span = (end - start).days + 1
-        cap = MAX_RANGE_DAYS_WITH_DETAILS if include_details else MAX_RANGE_DAYS
-        if span > cap:
-            raise _RangeError(f"Khoảng thời gian tối đa {cap} ngày", "RANGE_TOO_LONG")
+        if (end - start).days + 1 > MAX_RANGE_DAYS:
+            raise _RangeError(f"Khoảng thời gian tối đa {MAX_RANGE_DAYS} ngày", "RANGE_TOO_LONG")
         return start, end, "range"
 
     if not year or not month:
@@ -429,7 +428,6 @@ def get_class_log_student_report(
                 _arg(month, "month"),
                 _arg(date_from, "date_from"),
                 _arg(date_to, "date_to"),
-                include_details,
             )
         except _RangeError as re_err:
             return error_response(message=re_err.message, code=re_err.code)
