@@ -305,9 +305,26 @@ def on_family_change(doc, method=None):
 
 
 def on_class_student_change(doc, method=None):
-    """SIS Class Student after_insert/on_update/on_trash — HS vào/ra lớp."""
+    """SIS Class Student after_insert/on_update/on_trash — HS vào/ra lớp.
+
+    on_update phải bắn cho CẢ lớp cũ: doc save đổi `class_id` (hoặc `school_year_id`)
+    chỉ để lại lớp MỚI trên doc, lớp cũ không còn ai gọi reconcile ⇒ PH của HS đó kẹt
+    trong nhóm lớp cũ tới cron 6:30 hôm sau. Nhánh chuyển lớp của `assign_student`
+    dùng frappe.db.set_value nên không qua đây (đã tự enqueue 2 lớp tại chỗ), nhưng
+    mọi luồng save thông thường (desk, script, code sau này) thì trông vào chỗ này.
+    """
     try:
         enqueue_chat_membership_sync(doc.get("class_id"), doc.get("school_year_id"))
+        if method == "on_update":
+            prev = doc.get_doc_before_save()
+            if prev is not None:
+                prev_class = prev.get("class_id")
+                prev_year = prev.get("school_year_id") or doc.get("school_year_id")
+                if prev_class and (
+                    prev_class != doc.get("class_id")
+                    or prev_year != doc.get("school_year_id")
+                ):
+                    enqueue_chat_membership_sync(prev_class, prev_year)
     except Exception as e:
         frappe.logger().warning(
             f"[Chat Membership Hook] on_class_student_change: {str(e)}"

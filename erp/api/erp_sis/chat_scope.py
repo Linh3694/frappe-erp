@@ -186,6 +186,12 @@ def _build_class_chat_scope(cls, class_id, school_year_id):
         "guardians": guardians,
         "teachers": teachers,
         "subject_teachers": subject_teachers,
+        # Số dòng SIS Class Student đếm được từ CHÍNH query roster ở trên — marker để
+        # social-service phân biệt "lớp rỗng thật" (chuyển hết HS đi ⇒ phải gỡ PH ở lại)
+        # với "scope trả rỗng do lỗi" (guard SCOPE_EMPTY_ROSTER, chỉ ADD không revoke).
+        # Xem services/chatMembershipSync.js. Đừng đổi thành len(students_out): hai giá trị
+        # hiện bằng nhau, nhưng ý nghĩa ở đây là ĐẾM ĐĂNG KÝ LỚP, không phải HS resolve được.
+        "studentCount": len(class_student_rows),
     }
 
 

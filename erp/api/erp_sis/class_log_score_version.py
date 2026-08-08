@@ -87,16 +87,58 @@ def resolve_score_values(score_names, reference_date=None, base_values=None):
     return resolved
 
 
+def resolve_score_effective(score_names, reference_date=None, base_values=None):
+    """Như resolve_score_values nhưng kèm ngày áp dụng & tên đợt đang có hiệu lực.
+
+    Trả về dict name -> {"value", "effective_date", "version_label"}.
+    Lựa chọn chưa có đợt nào: effective_date = None, version_label = None.
+    """
+    names = [n for n in set(score_names or []) if n]
+    if not names:
+        return {}
+
+    values = resolve_score_values(names, reference_date, base_values=base_values)
+    result = {
+        n: {"value": values.get(n, 0), "effective_date": None, "version_label": None}
+        for n in names
+    }
+
+    if not frappe.db.table_exists(DOCTYPE):
+        return result
+
+    ref = _parse_reference_date(reference_date)
+    for v in frappe.get_all(
+        DOCTYPE,
+        filters={"class_log_score": ["in", names], "effective_date": ["<=", ref]},
+        fields=["class_log_score", "value", "effective_date", "label"],
+        order_by="effective_date asc, modified asc",
+        limit_page_length=0,
+        ignore_permissions=True,
+    ):
+        result[v["class_log_score"]] = {
+            "value": float(v.get("value") or 0),
+            "effective_date": str(v.get("effective_date")) if v.get("effective_date") else None,
+            "version_label": v.get("label") or None,
+        }
+
+    return result
+
+
 def apply_versions_to_rows(rows, reference_date=None, name_field="name", value_field="value"):
-    """Ghi đè `value` trong danh sách dict lựa chọn theo phiên bản có hiệu lực."""
+    """Ghi đè `value` + gắn `effective_date`/`version_label` của đợt đang có hiệu lực."""
     if not rows:
         return rows
     base = {r.get(name_field): r.get(value_field) for r in rows if r.get(name_field)}
-    resolved = resolve_score_values(base.keys(), reference_date, base_values=base)
+    resolved = resolve_score_effective(base.keys(), reference_date, base_values=base)
     for r in rows:
-        name = r.get(name_field)
-        if name in resolved:
-            r[value_field] = resolved[name]
+        info = resolved.get(r.get(name_field))
+        if not info:
+            continue
+        # Giữ giá trị gốc để form sửa không ghi đè bằng giá trị của đợt
+        r["base_value"] = float(r.get(value_field) or 0)
+        r[value_field] = info["value"]
+        r["effective_date"] = info["effective_date"]
+        r["version_label"] = info["version_label"]
     return rows
 
 
@@ -230,6 +272,7 @@ def delete_class_log_score_version(name: str = None):
 
 __all__ = [
     "resolve_score_values",
+    "resolve_score_effective",
     "apply_versions_to_rows",
     "get_class_log_score_versions",
     "create_class_log_score_version",
