@@ -447,11 +447,14 @@ def _pick_subject_title_for_classlog_row(subject_log, timetable_subject_map, per
 
 
 @frappe.whitelist(allow_guest=False)
-def get_class_log_options(education_stage=None, reference_date=None):
+def get_class_log_options(education_stage=None, reference_date=None, include_inactive=None):
     """Get class log options (master data)
 
     `value` trả về là giá trị có hiệu lực tại `reference_date` (mặc định hôm nay)
     theo phiên bản điểm — xem erp.api.erp_sis.class_log_score_version.
+
+    `include_inactive=1` trả cả lựa chọn đã tắt (chỉ dùng cho trang cấu hình);
+    mặc định chỉ trả lựa chọn đang bật để màn hình ghi sổ không thấy mục đã tắt.
 
     ⚡ Performance: Cached for 30 minutes (shared cache - master data)
     """
@@ -461,17 +464,23 @@ def get_class_log_options(education_stage=None, reference_date=None):
                 education_stage = frappe.request.args.get('education_stage')
             if not reference_date:
                 reference_date = frappe.request.args.get('reference_date')
+            if include_inactive is None:
+                include_inactive = frappe.request.args.get('include_inactive')
 
         reference_date = _parse_score_reference_date(reference_date)
+        include_inactive = str(include_inactive or "").lower() in ("1", "true", "yes")
 
-        filters = {"is_active": 1}
+        filters = {} if include_inactive else {"is_active": 1}
         if education_stage:
             filters["education_stage"] = education_stage
         
         # ⚡ CACHE: Check Redis cache first (30 min TTL - shared cache for master data)
         # v2: thêm homeroom type - đổi key để invalidate cache cũ
         # v3: value phụ thuộc ngày tham chiếu (phiên bản điểm) => key kèm ngày
-        cache_key = f"class_log_options:v3:{education_stage or 'all'}:{reference_date}"
+        cache_key = (
+            f"class_log_options:v3:{education_stage or 'all'}:{reference_date}"
+            f":{'all' if include_inactive else 'active'}"
+        )
 
         try:
             cached_data = frappe.cache().get_value(cache_key)
@@ -490,7 +499,10 @@ def get_class_log_options(education_stage=None, reference_date=None):
         rows = frappe.get_all(
             "SIS Class Log Score",
             filters=filters,
-            fields=["name", "type", "title_vn", "title_en", "value", "color", "education_stage", "is_default"],
+            fields=[
+                "name", "type", "title_vn", "title_en", "value", "color",
+                "education_stage", "is_default", "is_active",
+            ],
             order_by="type asc, value desc, title_vn asc"
         )
 
