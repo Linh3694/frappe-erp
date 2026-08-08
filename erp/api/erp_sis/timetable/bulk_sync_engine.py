@@ -626,15 +626,23 @@ class BulkSyncEngine:
 			return
 		
 		frappe.logger().info(f"🔄 [BulkSync] Bulk inserting {len(entries)} teacher entries...")
-		
+
+		# Bulk INSERT bỏ qua doc_events nên campus_id phải set tường minh ở đây.
+		# Lấy theo class_id (nguồn dữ liệu) — không dùng campus của session, vì hàm này
+		# chạy được cả trong job nền, nơi session là Administrator.
+		campus_by_class = {}
+		for class_id in {e['class_id'] for e in entries if e.get('class_id')}:
+			campus_by_class[class_id] = frappe.db.get_value("SIS Class", class_id, "campus_id")
+
 		# Batch insert (500 entries per batch)
 		batch_size = 500
 		for i in range(0, len(entries), batch_size):
 			batch = entries[i:i + batch_size]
-			
+
 			# Build VALUES clause
 			values = []
 			for entry in batch:
+				campus_id = campus_by_class.get(entry.get('class_id'))
 				values.append(f"""(
 					'{frappe.generate_hash(length=10)}',
 					'{entry['teacher_id']}',
@@ -645,16 +653,17 @@ class BulkSyncEngine:
 					{f"'{entry['room_id']}'" if entry.get('room_id') else 'NULL'},
 					'{entry['date']}',
 					'{entry['timetable_instance_id']}',
+					{f"'{campus_id}'" if campus_id else 'NULL'},
 					NOW(),
 					NOW(),
 					'{frappe.session.user}',
 					'{frappe.session.user}'
 				)""")
-			
+
 			sql = f"""
-				INSERT INTO `tabSIS Teacher Timetable` 
-				(name, teacher_id, class_id, day_of_week, timetable_column_id, 
-				 subject_id, room_id, date, timetable_instance_id, 
+				INSERT INTO `tabSIS Teacher Timetable`
+				(name, teacher_id, class_id, day_of_week, timetable_column_id,
+				 subject_id, room_id, date, timetable_instance_id, campus_id,
 				 creation, modified, owner, modified_by)
 				VALUES {','.join(values)}
 			"""
@@ -705,8 +714,10 @@ class BulkSyncEngine:
 					'{frappe.session.user}'
 				)""")
 			
+			# campus-lint: ignore — code chết: _bulk_insert_student_entries `return` ngay
+			# đầu hàm (Student Timetable sync đã bị tắt) và không nơi nào gọi hàm này.
 			sql = f"""
-				INSERT INTO `tabSIS Student Timetable` 
+				INSERT INTO `tabSIS Student Timetable`
 				(name, student_id, class_id, day_of_week, timetable_column_id, 
 				 subject_id, teacher_1_id, teacher_2_id, room_id, date, 
 				 timetable_instance_id, creation, modified, owner, modified_by)

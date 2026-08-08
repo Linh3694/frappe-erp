@@ -134,3 +134,49 @@ def crm_student_query(user):
 
 def crm_pic_config_query(user):
 	return campus_doctype_query("CRM PIC Config", user)
+
+
+# --- Bo sung 2026-08-07: 14 doctype co campus_id nhung truoc day KHONG co
+# permission_query_conditions/has_permission -> khong duoc loc o tang DB.
+def erp_budget_settlement_query(user):
+	return campus_doctype_query("ERP Budget Settlement", user)
+
+def erp_budget_plan_query(user):
+	return campus_doctype_query("ERP Budget Plan", user)
+
+def erp_purchase_request_query(user):
+	return campus_doctype_query("ERP Purchase Request", user)
+
+def erp_purchase_order_query(user):
+	return campus_doctype_query("ERP Purchase Order", user)
+
+def erp_organization_unit_query(user):
+	return campus_doctype_query("ERP Organization Unit", user)
+
+def faceid_device_query(user):
+	return campus_doctype_query("FaceID Device", user)
+
+def faceid_person_query(user):
+	return campus_doctype_query("FaceID Person", user)
+
+def faceid_access_group_query(user):
+	return campus_doctype_query("FaceID Access Group", user)
+
+def crm_admission_target_query(user):
+	return campus_doctype_query("CRM Admission Target", user)
+
+def sis_knowledge_base_category_query(user):
+	return campus_doctype_query("SIS Knowledge Base Category", user)
+
+def sis_knowledge_base_article_query(user):
+	return campus_doctype_query("SIS Knowledge Base Article", user)
+
+def sis_class_newsfeed_poster_query(user):
+	return campus_doctype_query("SIS Class Newsfeed Poster", user)
+
+def mdm_policy_query(user):
+	return campus_doctype_query("MDM Policy", user)
+
+def mdm_device_query(user):
+	return campus_doctype_query("MDM Device", user)
+

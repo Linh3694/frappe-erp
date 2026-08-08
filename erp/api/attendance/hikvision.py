@@ -55,6 +55,11 @@ def _enqueue_buffer_drain():
 # Sự kiện AccessController không mang mã người (VD: 1029) — thường gửi hàng loạt, chỉ cần trả 200, không spam log
 SKIP_SUB_EVENT_TYPES_NO_PERSON = frozenset({1029})
 
+# subEventType = 7 (Invalid Time Period): thiết bị TỪ CHỐI mở cửa, người quẹt không đi qua.
+# Chỉ cổng đã cấu hình khung giờ mới trả 7; đi muộn/về sớm có cổng riêng không cài giờ.
+# Event này bị loại ở cả hai đường xử lý (direct + batch_processor) — không điểm danh, không notify.
+INVALID_TIME_PERIOD_SUB_EVENT = 7
+
 # Phase D.1: Track latency p95 in-memory cho monitoring
 # Mỗi gunicorn worker có deque riêng (process-level state) → OK vì dùng để health check, không phải metric chính xác
 _LATENCY_SAMPLES = deque(maxlen=200)
@@ -937,9 +942,20 @@ def process_single_attendance_event(event_data):
 			except Exception as dedup_err:
 				logger.warning("dedup cache error: %s", str(dedup_err))
 
+		# Thiết bị đã chặn tại cổng (ngoài khung giờ) — người quẹt KHÔNG đi qua.
+		# Loại hẳn: không ghi điểm danh, không notify. Fix 2026-08-03 ("vẫn gửi
+		# notification") đã bỏ vì nay đi muộn/về sớm có cổng riêng không cài giờ.
+		if sub_event_type == INVALID_TIME_PERIOD_SUB_EVENT:
+			_increment_daily_counter("attendance:invalid_time_period:count")
+			logger.info(
+				"blocked subEvent=7 employee=%s device=%s - skip attendance + notification",
+				employee_code, device_name,
+			)
+			return True
+
 		# Parse timestamp
 		parsed_timestamp = parse_attendance_timestamp(timestamp)
-		
+
 		# Find or create attendance record
 		attendance_doc = find_or_create_day_record(
 			employee_code=employee_code,
@@ -971,18 +987,6 @@ def process_single_attendance_event(event_data):
 		
 		logger.info("attendance saved employee=%s", employee_code)
 		
-		# subEventType = 7 (Invalid Time Period) nghĩa là người quẹt ngoài khung giờ
-		# thiết bị cho phép — nhưng bản ghi điểm danh Ở TRÊN đã được lưu, nên vẫn phải
-		# thông báo. Trước đây chặn ở đây làm phụ huynh không biết con đã tới trường
-		# cho tới khi em quẹt lại một đầu đọc khác (ca 2026-08-03: lệch 12 phút).
-		INVALID_TIME_PERIOD_SUB_EVENT = 7
-		if sub_event_type == INVALID_TIME_PERIOD_SUB_EVENT:
-			_increment_daily_counter("attendance:invalid_time_period:count")
-			logger.info(
-				"invalid time period subEvent=7 employee=%s device=%s - van gui notification",
-				employee_code, device_name,
-			)
-
 		# Luôn enqueue notification; worker skip push nếu event stale, vẫn tạo notification list
 		try:
 			frappe.enqueue(

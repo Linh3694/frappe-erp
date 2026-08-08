@@ -472,16 +472,23 @@ def bulk_upsert_teacher_timetable(entries: List[Dict]):
 	
 	entries = list(by_key.values())
 	
+	# Bulk INSERT bỏ qua doc_events nên campus_id phải set tường minh.
+	# Lấy theo class_id (nguồn dữ liệu), không theo session — hàm này chạy cả trong job nền.
+	campus_by_class = {}
+	for class_id in {e.get("class_id") for e in entries if e.get("class_id")}:
+		campus_by_class[class_id] = frappe.db.get_value("SIS Class", class_id, "campus_id")
+
 	# Batch insert with ON DUPLICATE KEY UPDATE
 	chunk_size = 100
+	FIELDS_PER_ENTRY = 9
 	for i in range(0, len(entries), chunk_size):
 		chunk = entries[i:i + chunk_size]
-		
+
 		values = []
 		params = []
-		
+
 		for entry in chunk:
-			values.append("(%s, %s, %s, %s, %s, %s, %s, %s)")
+			values.append("(%s, %s, %s, %s, %s, %s, %s, %s, %s)")
 			params.extend([
 				entry["teacher_id"],
 				entry["class_id"],
@@ -490,14 +497,15 @@ def bulk_upsert_teacher_timetable(entries: List[Dict]):
 				entry["timetable_column_id"],
 				entry["subject_id"],
 				entry.get("room_id"),
-				entry["timetable_instance_id"]
+				entry["timetable_instance_id"],
+				campus_by_class.get(entry.get("class_id")),
 			])
 		
 		# ⚡ FIX: Generate names for new entries
 		# Add name field to each value tuple
 		values_with_names = []
 		params_with_names = []
-		for val_idx in range(0, len(params), 8):  # 8 fields per entry
+		for val_idx in range(0, len(params), FIELDS_PER_ENTRY):
 			# ⚡ FIX (2026-01-05): Thêm instance_id vào name để tránh conflict giữa các classes
 			# Trước: teacher_date_column (conflict khi 2 classes cùng teacher+date+column)
 			# Sau: instance_teacher_date_column (unique per instance)
@@ -506,7 +514,7 @@ def bulk_upsert_teacher_timetable(entries: List[Dict]):
 			column_id = params[val_idx + 4]
 			instance_id = params[val_idx + 7]  # timetable_instance_id
 			name = f"{instance_id}_{teacher_id}_{date_val}_{column_id}"
-			
+
 			# Prepend name to the value list
 			params_with_names.extend([
 				name,
@@ -517,20 +525,22 @@ def bulk_upsert_teacher_timetable(entries: List[Dict]):
 				params[val_idx + 4], # timetable_column_id
 				params[val_idx + 5], # subject_id
 				params[val_idx + 6], # room_id
-				params[val_idx + 7]  # timetable_instance_id
+				params[val_idx + 7], # timetable_instance_id
+				params[val_idx + 8], # campus_id
 			])
-			values_with_names.append("(%s, %s, %s, %s, %s, %s, %s, %s, %s)")
-		
+			values_with_names.append("(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
+
 		# Execute bulk upsert with name field
 		frappe.db.sql(f"""
 			INSERT INTO `tabSIS Teacher Timetable`
 			(name, teacher_id, class_id, date, day_of_week, timetable_column_id,
-			 subject_id, room_id, timetable_instance_id)
+			 subject_id, room_id, timetable_instance_id, campus_id)
 			VALUES {', '.join(values_with_names)}
 			ON DUPLICATE KEY UPDATE
 				subject_id = VALUES(subject_id),
 				room_id = VALUES(room_id),
-				timetable_instance_id = VALUES(timetable_instance_id)
+				timetable_instance_id = VALUES(timetable_instance_id),
+				campus_id = VALUES(campus_id)
 		""", tuple(params_with_names))
 
 
@@ -555,23 +565,29 @@ def bulk_upsert_student_timetable(entries: List[Dict]):
 		by_key[key] = entry
 	
 	entries = list(by_key.values())
-	
+
+	# Bulk INSERT bỏ qua doc_events nên campus_id phải set tường minh.
+	# Lấy theo class_id (nguồn dữ liệu), không theo session — hàm này chạy cả trong job nền.
+	campus_by_class = {}
+	for class_id in {e.get("class_id") for e in entries if e.get("class_id")}:
+		campus_by_class[class_id] = frappe.db.get_value("SIS Class", class_id, "campus_id")
+
 	# Batch insert
 	chunk_size = 100
 	for i in range(0, len(entries), chunk_size):
 		chunk = entries[i:i + chunk_size]
-		
+
 		values = []
 		params = []
-		
+
 		for entry in chunk:
 			# ⚡ FIX: Generate unique name for each entry
 			student_id = entry["student_id"]
 			date_val = entry["date"]
 			column_id = entry["timetable_column_id"]
 			name = f"{student_id}_{date_val}_{column_id}"
-			
-			values.append("(%s, %s, %s, %s, %s, %s, %s, %s, %s)")
+
+			values.append("(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
 			params.extend([
 				name,  # ⚡ ADD name field
 				entry["student_id"],
@@ -581,17 +597,19 @@ def bulk_upsert_student_timetable(entries: List[Dict]):
 				entry["timetable_column_id"],
 				entry["subject_id"],
 				entry.get("room_id"),
-				entry["timetable_instance_id"]
+				entry["timetable_instance_id"],
+				campus_by_class.get(entry.get("class_id")),
 			])
-		
+
 		frappe.db.sql(f"""
 			INSERT INTO `tabSIS Student Timetable`
 			(name, student_id, class_id, date, day_of_week, timetable_column_id,
-			 subject_id, room_id, timetable_instance_id)
+			 subject_id, room_id, timetable_instance_id, campus_id)
 			VALUES {', '.join(values)}
 			ON DUPLICATE KEY UPDATE
 				subject_id = VALUES(subject_id),
 				room_id = VALUES(room_id),
-				timetable_instance_id = VALUES(timetable_instance_id)
+				timetable_instance_id = VALUES(timetable_instance_id),
+				campus_id = VALUES(campus_id)
 		""", tuple(params))
 

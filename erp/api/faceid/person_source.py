@@ -232,6 +232,34 @@ def _sync_staff_active_state(person_name: str, enabled: int) -> str | None:
     return None
 
 
+def _staff_campus_id(user_name: str) -> str | None:
+    """Campus của nhân sự — theo DỮ LIỆU, không theo session.
+
+    Hàm này được gọi từ hook User và từ job nền (session = Administrator), nên tuyệt đối
+    không dùng campus của session: `get_user_campuses()[0]` cho Administrator trả campus
+    tuỳ ý theo thứ tự `modified desc` — đúng cơ chế đã đóng dấu sai 76.201 dòng.
+
+    Ưu tiên hồ sơ SIS Teacher; nếu không có thì chỉ nhận role campus khi user có ĐÚNG một
+    campus. Nhiều campus thì trả None (để trống còn hơn gán sai).
+    """
+    campus = frappe.db.get_value("SIS Teacher", {"user_id": user_name}, "campus_id")
+    if campus:
+        return campus
+    try:
+        from erp.sis.utils.campus_permissions import get_user_campuses
+
+        campuses = get_user_campuses(user_name)
+        if len(campuses) == 1:
+            return campuses[0]
+        if len(campuses) > 1:
+            frappe.logger().info(
+                f"[FaceID] {user_name} thuoc {len(campuses)} campus — de trong campus_id"
+            )
+    except Exception:
+        pass
+    return None
+
+
 def sync_staff_user(user_name: str) -> str | None:
     """Upsert person cho MỘT user (hook User tạo mới / bật-tắt tài khoản)."""
     user_type = frappe.db.get_value("User", user_name, "user_type")
@@ -256,6 +284,7 @@ def sync_staff_user(user_name: str) -> str | None:
             "department": (row.get("department") or "").strip(),
             "photo_url": row.get("user_image") or get_user_photo_url(user_name),
             "user": user_name,
+            "campus_id": _staff_campus_id(user_name),
         }
     )
     enabled = cint(frappe.db.get_value("User", user_name, "enabled"))
@@ -648,6 +677,7 @@ def refresh_staff() -> dict:
                 "department": department,
                 "photo_url": photo_url,
                 "user": u.name,
+                "campus_id": _staff_campus_id(u.name),
             }
         )
         if action in ("created", "created_prefixed"):

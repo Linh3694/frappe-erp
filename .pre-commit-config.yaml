@@ -63,6 +63,24 @@ repos:
                 erp/public/js/lib/.*
             )$
 
+  # --- Kiểm tra cách ly campus (local, không cần mạng) --------------------
+  # Xem CLAUDE.md mục 1 để biết vì sao hai hook này tồn tại.
+  - repo: local
+    hooks:
+      - id: campus-raw-insert
+        name: "Campus: INSERT thô phải có campus_id"
+        entry: python3 erp/scripts/lint_campus_raw_insert.py
+        language: system
+        types: [python]
+        pass_filenames: true
+
+      - id: campus-doctype-hooks
+        name: "Campus: doctype có campus_id phải đăng ký hooks"
+        entry: python3 erp/scripts/check_campus_doctype_hooks.py
+        language: system
+        pass_filenames: false
+        files: '(hooks\.py|.*/doctype/.*\.json|.*permission_query.*\.py)$'
+
 ci:
     autoupdate_schedule: weekly
     skip: []
