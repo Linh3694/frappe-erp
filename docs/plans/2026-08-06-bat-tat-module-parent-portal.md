@@ -9,13 +9,20 @@ Ngày chốt: 2026-08-06 · Phạm vi: `frappe-backend/apps/erp`, `frappe-sis-fr
 |---|---|
 | **1. Backend** — field, validate, `get_my_modules`, cache, 25 test | ✅ **Xong** 2026-08-06 (chưa chạy `bench migrate`) |
 | **2. WIS** — trang cấu hình `/school/system-config/portal-modules` | ✅ **Xong** 2026-08-06 |
-| **3. PP mobile** — registry, hook, lọc 2 bề mặt, header nền tảng | ✅ **Xong** 2026-08-06 (chưa bump version, chưa build) |
-| 4. PP web | ❌ **BỎ** — chốt 2026-08-06: web cứ chạy như hiện tại, không đụng |
+| **3. PP mobile** — registry, hook, lọc menu + tab + deep link + 32 route | ✅ **Xong** 2026-08-06 (chưa bump version, chưa build) |
+| **4. PP web** — registry, context, lọc 4 bề mặt, chốt route | ✅ **Xong** 2026-08-06 |
 
-**Hệ quả của việc bỏ web:** PP web không gửi `X-Client-Platform` và không đọc cờ, nên
-mọi cấu hình ở đây chỉ tác động tới app. Trang WIS vì thế chỉ có cột **Chung** +
-**App**, không có cột Web — nút bấm không có tác dụng còn tệ hơn là không có nút.
-Backend vẫn giữ `platforms.web` cho tương lai.
+Web ban đầu bị loại khỏi phạm vi rồi đưa lại vào cùng ngày. WIS vì thế có đủ **3 cột**:
+Chung · Web · App.
+
+**Khác biệt kiến trúc giữa hai client:**
+
+| | Web | App |
+|---|---|---|
+| Kho cờ | `PortalModuleContext` + localStorage | React Query + MMKV |
+| Làm tươi | `window.focus` | `focusManager` của React Query |
+| Chốt màn hình | **1 chỗ** — `AppLayout` bọc mọi trang | **32 route file** — expo-router không có layout chung cho `app/feature/` |
+| Gỡ vỏ response | tự gỡ `message` (`apiService` không gỡ) | `unwrap` sẵn có |
 
 `pp_modules_json` rỗng ⇒ `get_my_modules` trả `modules: {}` ⇒ không ẩn gì. Cần chạy
 `bench --site <site> migrate` để field mới xuất hiện.

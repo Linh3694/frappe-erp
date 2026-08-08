@@ -3078,6 +3078,182 @@ def get_subtasks():
         return error_response(str(e))
 
 
+# Trạng thái subtask coi là "còn phải làm" — Completed/Cancelled thì thôi.
+_SUBTASK_OPEN_STATUSES = ("In Progress",)
+
+
+@frappe.whitelist(allow_guest=False)
+def get_my_subtasks():
+    """Công việc con được giao cho user hiện tại, gom theo ticket cha.
+
+    Phục vụ tab "Việc của tôi" ở mobile: trước đây subtask chỉ thấy được khi mở
+    đúng ticket cha nên người được giao không biết mình có việc. Endpoint tự
+    scope theo `assigned_to == frappe.session.user` nên KHÔNG gate theo staff —
+    gate như vậy sẽ giấu việc khỏi đúng người mà tính năng này sinh ra để phục vụ.
+
+    Body (tuỳ chọn):
+      - scope: "pending" (mặc định) chỉ trả ticket còn việc chưa xong | "all"
+      - limit: số subtask tối đa quét (mặc định 300, tối đa 1000)
+    """
+    try:
+        user = frappe.session.user
+        if not user or user == "Guest":
+            return validation_error_response(_("Chưa đăng nhập"), {"user": ["required"]})
+
+        data = _parse_json_body()
+        scope = (data.get("scope") or "pending").strip().lower()
+        if scope not in ("pending", "all"):
+            scope = "pending"
+        limit = cint(data.get("limit")) or 300
+        limit = max(1, min(limit, 1000))
+
+        empty = {
+            "tickets": [],
+            "totalOpenSubTasks": 0,
+            "totalSubTasks": 0,
+            "totalTickets": 0,
+            "canOpenTicketDetail": _is_staff(),
+        }
+
+        # Q1 — subtask của tôi. Lọc theo frappe.session.user (User.name) chứ KHÔNG
+        # phải _session_email(): create_subtask lưu _id từ get_subtask_assignee_options,
+        # tức là User.name.
+        sub_rows = frappe.get_all(
+            SUBTASK_DOCTYPE,
+            filters={"assigned_to": user},
+            fields=["name", "ticket", "title", "description", "status", "creation", "modified"],
+            order_by="creation asc",
+            limit_page_length=limit,
+        )
+        if not sub_rows:
+            return success_response(empty, "OK")
+
+        ticket_ids = list({r.ticket for r in sub_rows if r.ticket})
+        if not ticket_ids:
+            return success_response(empty, "OK")
+
+        # Q2 — ticket cha. Cố ý KHÔNG dùng _ticket_to_dict: nó bắn thêm hàng loạt
+        # query cho mỗi ticket (category, user, room, thiết bị, ảnh học sinh bằng raw
+        # SQL) và trả cả description/attachment/related_students — thừa và lộ dữ liệu
+        # cho người chỉ dính tới ticket qua đúng một công việc con.
+        ticket_rows = frappe.get_all(
+            DOCTYPE,
+            filters={"name": ["in", ticket_ids]},
+            fields=[
+                "name",
+                "ticket_code",
+                "title",
+                "status",
+                "priority",
+                "category",
+                "assigned_to",
+                "assigned_to_fullname",
+                "creator_email",
+                "creator_fullname",
+                "creation",
+                "modified",
+            ],
+            order_by="creation desc",
+            limit_page_length=0,
+        )
+        tmap = {t.name: t for t in ticket_rows}
+
+        # Q3 — nhãn danh mục (bỏ qua nếu không ticket nào có category).
+        cat_ids = list({t.category for t in ticket_rows if t.category})
+        cat_labels = {}
+        if cat_ids:
+            cat_labels = {
+                c.name: (c.title or c.name)
+                for c in frappe.get_all(
+                    "ERP Administrative Support Category",
+                    filters={"name": ["in", cat_ids]},
+                    fields=["name", "title"],
+                    limit_page_length=0,
+                )
+            }
+
+        # Gom subtask theo ticket, giữ thứ tự ticket của Q2 (creation desc).
+        grouped = {}
+        for r in sub_rows:
+            t = tmap.get(r.ticket)
+            if not t:
+                # Ticket cha đã biến mất (không nên xảy ra vì delete_ticket không
+                # ignore_links) — bỏ qua thay vì nổ KeyError.
+                continue
+            grouped.setdefault(r.ticket, []).append(
+                {
+                    "_id": r.name,
+                    "ticketId": r.ticket,
+                    "title": r.title,
+                    "description": r.description or "",
+                    "status": r.status,
+                    "createdAt": r.creation,
+                    "updatedAt": r.modified,
+                }
+            )
+
+        out = []
+        total_open = 0
+        total_sub = 0
+        for t in ticket_rows:
+            subs = grouped.get(t.name)
+            if not subs:
+                continue
+            # Ticket cha đã huỷ = việc chết, không bao giờ hiện.
+            if t.status == "Cancelled":
+                continue
+            open_count = sum(1 for s in subs if s["status"] in _SUBTASK_OPEN_STATUSES)
+            if scope == "pending":
+                if open_count == 0:
+                    continue
+                if t.status in ("Closed", "Resolved"):
+                    continue
+            total_open += open_count
+            total_sub += len(subs)
+            out.append(
+                {
+                    "_id": t.name,
+                    "ticketCode": t.ticket_code or t.name,
+                    "title": t.title,
+                    "status": t.status,
+                    "priority": t.priority or "",
+                    "category": t.category or "",
+                    "categoryLabel": cat_labels.get(t.category, "") if t.category else "",
+                    "assignedTo": (
+                        {"_id": t.assigned_to, "fullname": t.assigned_to_fullname or t.assigned_to}
+                        if t.assigned_to
+                        else None
+                    ),
+                    "creator": {
+                        "email": t.creator_email or "",
+                        "fullname": t.creator_fullname or "",
+                    },
+                    "createdAt": t.creation,
+                    "updatedAt": t.modified,
+                    "openCount": open_count,
+                    "totalCount": len(subs),
+                    "subTasks": subs,
+                }
+            )
+
+        # Ticket còn việc chưa xong lên trước; trong mỗi nhóm giữ nguyên creation desc.
+        out.sort(key=lambda g: g["openCount"] == 0)
+
+        return success_response(
+            {
+                "tickets": out,
+                "totalOpenSubTasks": total_open,
+                "totalSubTasks": total_sub,
+                "totalTickets": len(out),
+                "canOpenTicketDetail": _is_staff(),
+            },
+            "OK",
+        )
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "administrative_ticket.get_my_subtasks")
+        return error_response(str(e))
+
+
 @frappe.whitelist(allow_guest=False)
 def create_subtask():
     """Tạo subtask."""

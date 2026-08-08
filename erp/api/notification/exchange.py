@@ -155,6 +155,8 @@ def _handle_chat_event_async(event_type, event_data):
 	try:
 		if event_type == "new_message":
 			_handle_new_chat_message(event_data)
+		elif event_type == "message_mention":
+			_handle_chat_mention(event_data)
 		elif event_type == "message_reaction":
 			_handle_chat_message_reaction(event_data)
 		elif event_type == "message_recalled":
@@ -271,6 +273,96 @@ def _handle_new_chat_message(event_data):
 			frappe.logger().error(f"❌ [Exchange] Bulk Expo failed: {be}")
 
 	_mirror_to_notification_service(mirror_targets, title_push, body_push, "chat_message", "new_message")
+
+
+def _handle_chat_mention(event_data):
+	"""Ai đó nhắc tên (@) trong chat — thông báo RIÊNG, không đi chung new_message.
+
+	social-service đã loại người được nhắc khỏi `new_message` nên mỗi người chỉ nhận một push.
+	KHÔNG debounce theo hội thoại như tin thường: bị gọi tên là việc cần biết ngay, chặn bớt
+	là hỏng đúng mục đích của tính năng.
+	"""
+	recipient_emails = event_data.get("recipientEmails") or []
+	if not isinstance(recipient_emails, list):
+		recipient_emails = []
+	recipient_emails = [e for e in recipient_emails if e]
+	if not recipient_emails:
+		frappe.logger().info("💬 [Exchange] message_mention: no recipients")
+		return
+
+	sender_name = (event_data.get("senderName") or "").strip()
+	preview_raw = (event_data.get("messagePreview") or "").strip()[:200]
+	name_vi = sender_name or SOMEONE["vi"]
+	name_en = sender_name or SOMEONE["en"]
+	if preview_raw:
+		body_push = bi(
+			_("%(name)s đã nhắc đến bạn: %(preview)s") % {"name": name_vi, "preview": preview_raw},
+			f"{name_en} mentioned you: {preview_raw}",
+		)
+	else:
+		body_push = bi(
+			_("%(name)s đã nhắc đến bạn") % {"name": name_vi},
+			f"{name_en} mentioned you",
+		)
+
+	base = _base_chat_data(event_data)
+	base["type"] = "chat_mention"
+
+	push_via_service = push_delivered_by_notification_service()
+	expo_targets = []
+	mirror_targets = []
+
+	for recipient_email in recipient_emails:
+		merged = {**base}
+		try:
+			notif_doc = create_notification(
+				title=CHAT_TITLE,
+				message=body_push,
+				recipient_user=recipient_email,
+				notification_type="system",
+				priority="high",
+				data=merged,
+				channel="push",
+				event_timestamp=frappe.utils.now(),
+			)
+			nid = notif_doc.name if hasattr(notif_doc, "name") else None
+		except Exception as ne:
+			frappe.logger().error(f"❌ [Exchange] mention notification {recipient_email}: {ne}")
+			nid = None
+
+		try:
+			emit_notification_to_user(
+				recipient_email,
+				{
+					"id": nid or f"MENTION-{frappe.generate_hash(length=8)}",
+					"type": "chat_mention",
+					"title": CHAT_TITLE,
+					"message": body_push,
+					"status": "unread",
+					"priority": "high",
+					"created_at": frappe.utils.now(),
+					"data": merged,
+				},
+			)
+			unread = get_unread_count(recipient_email)
+			emit_unread_count_update(recipient_email, unread)
+		except Exception as re:
+			frappe.logger().error(f"❌ [Exchange] mention realtime {recipient_email}: {re}")
+
+		expo_targets.append({"email": recipient_email, "data": dict(merged)})
+		if not push_via_service:
+			mirror_targets.append({"email": recipient_email, "data": dict(merged)})
+
+	if expo_targets:
+		try:
+			res = send_mobile_notifications_bulk(expo_targets, CHAT_TITLE, body_push)
+			frappe.logger().info(
+				f"💬 [Exchange] mention bulk Expo: {res.get('success_count', 0)}/{res.get('total_messages', 0)}"
+			)
+		except Exception as be:
+			frappe.logger().error(f"❌ [Exchange] mention bulk Expo failed: {be}")
+
+	_mirror_to_notification_service(mirror_targets, CHAT_TITLE, body_push, "chat_mention", "message_mention")
 
 
 def _handle_chat_poll_lifecycle(event_data, kind):

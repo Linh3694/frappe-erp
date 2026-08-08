@@ -19,7 +19,8 @@
    "in_list_view": 1,
    "label": "Ticket",
    "options": "ERP Administrative Ticket",
-   "reqd": 1
+   "reqd": 1,
+   "search_index": 1
   },
   {
    "fieldname": "title",
@@ -36,8 +37,9 @@
   {
    "fieldname": "assigned_to",
    "fieldtype": "Link",
-   "label": "Ng\u01b0\u1eddi t\u1ea1o subtask",
-   "options": "User"
+   "label": "Ng\u01b0\u1eddi x\u1eed l\u00fd",
+   "options": "User",
+   "search_index": 1
   },
   {
    "fieldname": "assigned_to_fullname",

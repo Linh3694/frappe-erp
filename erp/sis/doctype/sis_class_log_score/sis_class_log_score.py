@@ -4,13 +4,12 @@ from frappe import _
 
 
 def _clear_class_log_options_cache(doc):
-    """Xóa cache get_class_log_options khi SIS Class Log Score thay đổi"""
+    """Xóa cache get_class_log_options khi SIS Class Log Score thay đổi.
+
+    Key kèm ngày tham chiếu (v3) nên phải xoá theo prefix, không xoá từng key.
+    """
     try:
-        cache_key_all = "class_log_options:v2:all"
-        frappe.cache().delete_key(cache_key_all)
-        if doc.education_stage:
-            cache_key_stage = f"class_log_options:v2:{doc.education_stage}"
-            frappe.cache().delete_key(cache_key_stage)
+        frappe.cache().delete_keys("class_log_options:")
         frappe.logger().info(f"✅ Cleared class_log_options cache after SIS Class Log Score change: {doc.name}")
     except Exception as e:
         frappe.logger().warning(f"Cache clear failed: {e}")
@@ -60,6 +59,15 @@ class SISClassLogScore(Document):
         _clear_class_log_options_cache(self)
 
     def on_trash(self):
+        # Xóa các phiên bản điểm gắn lựa chọn này (tránh bản ghi mồ côi)
+        if frappe.db.table_exists("SIS Class Log Score Version"):
+            for row in frappe.get_all(
+                "SIS Class Log Score Version",
+                filters={"class_log_score": self.name},
+                pluck="name",
+            ):
+                frappe.delete_doc("SIS Class Log Score Version", row, force=True)
+
         _clear_class_log_options_cache(self)
 
 

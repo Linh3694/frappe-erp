@@ -20,6 +20,10 @@ import re
 import frappe
 from datetime import timedelta
 from erp.utils.api_response import success_response, error_response
+from erp.api.erp_sis.class_log_score_version import (
+    apply_versions_to_rows,
+    resolve_score_values,
+)
 
 # Tiểu học không dùng sổ đầu bài theo tiết như THCS/THPT
 PRIMARY_STAGE_ID = "EDU-STAGE-00001"
@@ -359,6 +363,20 @@ def _fetch_score_catalog(education_stage_id):
     return {r["name"]: r for r in rows}, rows
 
 
+def _score_value_at(base_values, score_name, log_date, cache):
+    """Giá trị của một lựa chọn tại ngày ghi sổ, theo phiên bản điểm có hiệu lực."""
+    if not score_name:
+        return 0.0
+    key = str(log_date)
+    resolved = cache.get(key)
+    if resolved is None:
+        resolved = resolve_score_values(base_values.keys(), log_date, base_values=base_values)
+        cache[key] = resolved
+    if score_name in resolved:
+        return float(resolved[score_name] or 0)
+    return float(base_values.get(score_name) or 0)
+
+
 def _ensure_scores_loaded(score_map, needed_names):
     """Bổ sung option nằm ngoài cấp học (dữ liệu cũ / lớp ghép khác cấp)"""
     missing = [n for n in needed_names if n and n not in score_map]
@@ -552,7 +570,9 @@ def get_class_log_student_report(
 
         if not subject_logs:
             base_payload["students"] = [_finalize_stat(s) for s in stats.values()]
-            base_payload["options"] = _fetch_score_catalog(education_stage_id)[1]
+            base_payload["options"] = apply_versions_to_rows(
+                _fetch_score_catalog(education_stage_id)[1], date_to
+            )
             return success_response(data=base_payload, message="Tháng này chưa có dữ liệu sổ đầu bài")
 
         subject_by_id = {sl["subject_id"]: sl for sl in subject_logs}
@@ -582,6 +602,11 @@ def get_class_log_student_report(
                 if issue_name:
                     needed.add(issue_name)
         catalog = catalog + _ensure_scores_loaded(score_map, needed)
+        # Giá trị gốc (trước khi ghi đè theo phiên bản) để tra theo từng ngày ghi sổ
+        _base_values = {n: float((r or {}).get("value") or 0) for n, r in score_map.items()}
+        _value_cache = {}
+        # Danh mục trả FE hiển thị giá trị đang hiệu lực cuối kỳ báo cáo
+        apply_versions_to_rows(catalog, date_to)
 
         # 5) Môn học / GV theo TKB
         timetable_map = _build_timetable_map(all_class_ids, date_from, date_to)
@@ -629,7 +654,7 @@ def get_class_log_student_report(
                 if not score_name:
                     continue
                 stat["counts"][score_name] = stat["counts"].get(score_name, 0) + 1
-                row_value += float((score_map.get(score_name) or {}).get("value") or 0)
+                row_value += _score_value_at(_base_values, score_name, log_date, _value_cache)
 
             stat["total_value"] += row_value
             bucket["total_value"] += row_value

@@ -10,6 +10,20 @@ from erp.api.erp_sis.utils.cache_utils import (
     HOMEROOM_CLASS_LOGS_CACHE_PREFIX,
     lesson_status_version_signature,
 )
+from erp.api.erp_sis.class_log_score_version import (
+    apply_versions_to_rows,
+    resolve_score_values,
+)
+
+
+def _parse_score_reference_date(reference_date):
+    """Chuẩn hoá ngày tham chiếu để tra phiên bản điểm — mặc định hôm nay."""
+    if not reference_date:
+        return frappe.utils.today()
+    try:
+        return str(frappe.utils.getdate(reference_date))
+    except Exception:
+        return frappe.utils.today()
 
 
 def _get_body():
@@ -433,14 +447,22 @@ def _pick_subject_title_for_classlog_row(subject_log, timetable_subject_map, per
 
 
 @frappe.whitelist(allow_guest=False)
-def get_class_log_options(education_stage=None):
+def get_class_log_options(education_stage=None, reference_date=None):
     """Get class log options (master data)
-    
+
+    `value` trả về là giá trị có hiệu lực tại `reference_date` (mặc định hôm nay)
+    theo phiên bản điểm — xem erp.api.erp_sis.class_log_score_version.
+
     ⚡ Performance: Cached for 30 minutes (shared cache - master data)
     """
     try:
-        if not education_stage and getattr(frappe, 'request', None):
-            education_stage = frappe.request.args.get('education_stage')
+        if getattr(frappe, 'request', None):
+            if not education_stage:
+                education_stage = frappe.request.args.get('education_stage')
+            if not reference_date:
+                reference_date = frappe.request.args.get('reference_date')
+
+        reference_date = _parse_score_reference_date(reference_date)
 
         filters = {"is_active": 1}
         if education_stage:
@@ -448,8 +470,9 @@ def get_class_log_options(education_stage=None):
         
         # ⚡ CACHE: Check Redis cache first (30 min TTL - shared cache for master data)
         # v2: thêm homeroom type - đổi key để invalidate cache cũ
-        cache_key = f"class_log_options:v2:{education_stage or 'all'}"
-        
+        # v3: value phụ thuộc ngày tham chiếu (phiên bản điểm) => key kèm ngày
+        cache_key = f"class_log_options:v3:{education_stage or 'all'}:{reference_date}"
+
         try:
             cached_data = frappe.cache().get_value(cache_key)
             if cached_data:
@@ -470,6 +493,10 @@ def get_class_log_options(education_stage=None):
             fields=["name", "type", "title_vn", "title_en", "value", "color", "education_stage", "is_default"],
             order_by="type asc, value desc, title_vn asc"
         )
+
+        # Ghi đè value theo phiên bản điểm có hiệu lực tại reference_date
+        apply_versions_to_rows(rows, reference_date)
+        rows.sort(key=lambda r: ((r.get('type') or ''), -float(r.get('value') or 0), (r.get('title_vn') or '')))
 
         grouped = {"homeroom": [], "homework": [], "behavior": [], "participation": [], "issue": [], "top_performance": []}
         for r in rows:
@@ -2603,34 +2630,60 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
             fields=["name", "type", "value", "is_default"]
         )
 
-        score_value_map = {}
-        default_values = {"homework": 0, "behavior": 0, "participation": 0, "top_performance": 0}
-        max_by_type = {"homework": 0, "behavior": 0, "participation": 0}
-
+        score_base_values = {r.get("name"): float(r.get("value") or 0) for r in score_rows if r.get("name")}
+        default_names = {}
         for r in score_rows:
-            name = r.get("name")
             t = (r.get("type") or "").lower()
-            val = float(r.get("value") or 0)
-            score_value_map[name] = val
+            if t in ("homework", "behavior", "participation", "top_performance") and r.get("is_default"):
+                default_names[t] = r.get("name")
 
-            if t in default_values and r.get("is_default"):
-                default_values[t] = val
-            if t in max_by_type and val > max_by_type[t]:
-                max_by_type[t] = val
+        # Giá trị điểm phụ thuộc ngày (phiên bản điểm) → cache theo ngày trong khoảng thống kê
+        _values_by_date = {}
+        _extra_base_values = {}
 
-        # max_lesson_score = tổng 3 options được đánh dấu is_default (homework + behavior + participation)
-        max_lesson_score = (default_values["homework"] or 0) + (default_values["behavior"] or 0) + (default_values["participation"] or 0)
-        if max_lesson_score <= 0:
-            max_lesson_score = 15
+        def _score_context(ref_date):
+            """(value_map, default_values, max_lesson_score) có hiệu lực tại ref_date."""
+            key = str(ref_date or "")
+            if key in _values_by_date:
+                return _values_by_date[key]
 
-        def _get_score_value(score_name):
-            """Lấy value từ score_name, fallback DB nếu không có trong map (do filter education_stage)."""
+            value_map = resolve_score_values(
+                score_base_values.keys(), ref_date, base_values=score_base_values
+            )
+            defaults = {"homework": 0, "behavior": 0, "participation": 0, "top_performance": 0}
+            for t, nm in default_names.items():
+                defaults[t] = value_map.get(nm, score_base_values.get(nm, 0)) or 0
+
+            max_lesson = (defaults["homework"] or 0) + (defaults["behavior"] or 0) + (defaults["participation"] or 0)
+            if max_lesson <= 0:
+                max_lesson = 15
+
+            ctx = (value_map, defaults, max_lesson)
+            _values_by_date[key] = ctx
+            return ctx
+
+        # Context "hôm nay" dùng cho config trả về FE khi không gắn với ngày cụ thể
+        _, default_values, max_lesson_score = _score_context(date_to)
+
+        def _get_score_value(score_name, ref_date=None):
+            """Value của score_name có hiệu lực tại ref_date.
+
+            Fallback DB nếu option nằm ngoài cấp học đang lọc (dữ liệu cũ / lớp ghép).
+            """
             if not score_name:
                 return None
-            if score_name in score_value_map:
-                return score_value_map[score_name]
-            val = frappe.db.get_value("SIS Class Log Score", score_name, "value")
-            return float(val) if val is not None else None
+            value_map, _defaults, _max = _score_context(ref_date if ref_date else date_to)
+            if score_name in value_map:
+                return value_map[score_name]
+
+            if score_name not in _extra_base_values:
+                val = frappe.db.get_value("SIS Class Log Score", score_name, "value")
+                _extra_base_values[score_name] = float(val) if val is not None else None
+            base = _extra_base_values[score_name]
+            if base is None:
+                return None
+            extra = resolve_score_values([score_name], ref_date or date_to, base_values={score_name: base})
+            return extra.get(score_name, base)
 
         # Attendance penalty mapping (wis-point.md Section 2.3)
         ATTENDANCE_PENALTY = {"present": 0, "late": -1, "excused": 0, "absent": -3}
@@ -2959,6 +3012,9 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                         "daily_avg": round(sum(daily_lesson_scores) / len(daily_lesson_scores), 2),
                     })
 
+            # Bảng điểm có hiệu lực tại ngày đang xét (phiên bản điểm theo ngày áp dụng)
+            _day_value_map, day_defaults, day_max_lesson_score = _score_context(date_str)
+
             # Tính điểm cho từng học sinh
             for student_id in student_ids:
                 h = 0.0
@@ -2995,12 +3051,12 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
                         if att_status is not None and att_status == "absent":
                             hw_val, beh_val, part_val, praise_val = 0, 0, 0, 0
                         else:
-                            hw_val = _get_score_value(student_log.get("homework")) if student_log and student_log.get("homework") else default_values["homework"]
-                            beh_val = _get_score_value(student_log.get("behavior")) if student_log and student_log.get("behavior") else default_values["behavior"]
-                            part_val = _get_score_value(student_log.get("participation")) if student_log and student_log.get("participation") else default_values["participation"]
+                            hw_val = _get_score_value(student_log.get("homework"), date_str) if student_log and student_log.get("homework") else day_defaults["homework"]
+                            beh_val = _get_score_value(student_log.get("behavior"), date_str) if student_log and student_log.get("behavior") else day_defaults["behavior"]
+                            part_val = _get_score_value(student_log.get("participation"), date_str) if student_log and student_log.get("participation") else day_defaults["participation"]
                             # wis-point.md: praise_score = value từ SIS Class Log Score (top_performance). Ưu tiên link, else default, fallback +1 khi được khen
                             if student_log and student_log.get("is_top_performance"):
-                                praise_val = _get_score_value(student_log.get("top_performance")) if student_log.get("top_performance") else default_values["top_performance"]
+                                praise_val = _get_score_value(student_log.get("top_performance"), date_str) if student_log.get("top_performance") else day_defaults["top_performance"]
                                 if (praise_val or 0) == 0:
                                     praise_val = 1  # Được khen nhưng chưa cấu hình → +1 điểm
                             else:
@@ -3021,7 +3077,7 @@ def get_wis_academic_scores(class_id=None, date_from=None, date_to=None):
 
                 if p > 0:
                     # b = max_lesson_score × c (số tiết HS có điểm danh: có mặt/muộn/vắng không phép)
-                    b = max_lesson_score * c if c > 0 else max_lesson_score * p
+                    b = day_max_lesson_score * c if c > 0 else day_max_lesson_score * p
                     base_score = (h / b) * 100 if b > 0 else 0
                     # Không có dữ liệu điểm danh (c=0) -> att=1, không phạt
                     attendance_factor = (c / p) ** N if c > 0 else 1

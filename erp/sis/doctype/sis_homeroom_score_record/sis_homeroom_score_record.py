@@ -22,6 +22,14 @@ class SISHomeroomScoreRecord(Document):
                 _("SIS Class Log Score phải có type=homeroom, hiện tại là: {0}").format(score_doc.type or "")
             )
 
-        # Lấy value từ SIS Class Log Score nếu chưa set
+        # Lấy value từ SIS Class Log Score nếu chưa set.
+        # Giá trị theo phiên bản điểm có hiệu lực tại ngày ghi nhận (fallback value gốc).
         if self.value is None or self.value == 0:
-            self.value = score_doc.value or 0
+            from erp.api.erp_sis.class_log_score_version import resolve_score_values
+
+            resolved = resolve_score_values(
+                [self.class_log_score_id],
+                self.date,
+                base_values={self.class_log_score_id: score_doc.value or 0},
+            )
+            self.value = resolved.get(self.class_log_score_id, score_doc.value or 0)
