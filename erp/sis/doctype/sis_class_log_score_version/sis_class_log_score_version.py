@@ -29,6 +29,10 @@ class SISClassLogScoreVersion(Document):
         if not self.effective_date:
             frappe.throw(_("Thiếu ngày áp dụng"))
 
+        # Tên đợt không bắt buộc — tự sinh từ ngày áp dụng cho dễ nhận biết
+        if not (self.label or "").strip():
+            self.label = _("Từ {0}").format(frappe.utils.formatdate(self.effective_date))
+
         # Mỗi lựa chọn chỉ có 1 phiên bản trên một ngày áp dụng
         duplicate = frappe.get_all(
             "SIS Class Log Score Version",

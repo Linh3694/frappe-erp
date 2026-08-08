@@ -28,8 +28,7 @@
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "Tên phiên bản",
-   "description": "Ví dụ: Học kỳ 1, Quý 1",
-   "reqd": 1
+   "description": "Tự sinh từ ngày áp dụng nếu để trống"
   },
   {
    "fieldname": "effective_date",

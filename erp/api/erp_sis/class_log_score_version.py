@@ -184,8 +184,6 @@ def create_class_log_score_version(
 
         if not class_log_score:
             return error_response(message="Thiếu class_log_score", code="MISSING_SCORE")
-        if not str(label or "").strip():
-            return error_response(message="Thiếu tên phiên bản", code="MISSING_LABEL")
         if not effective_date:
             return error_response(message="Thiếu ngày áp dụng", code="MISSING_DATE")
         if not frappe.db.exists("SIS Class Log Score", class_log_score):
@@ -195,7 +193,7 @@ def create_class_log_score_version(
             {
                 "doctype": DOCTYPE,
                 "class_log_score": class_log_score,
-                "label": str(label).strip(),
+                "label": (str(label).strip() if label else ""),
                 "effective_date": getdate(effective_date),
                 "value": float(value or 0),
             }
@@ -232,7 +230,7 @@ def update_class_log_score_version(
             return error_response(message="Phiên bản điểm không tồn tại", code="NOT_FOUND")
 
         doc = frappe.get_doc(DOCTYPE, name)
-        if label is not None and str(label).strip():
+        if label is not None:
             doc.label = str(label).strip()
         if effective_date:
             doc.effective_date = getdate(effective_date)
