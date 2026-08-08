@@ -87,11 +87,15 @@ def resolve_score_values(score_names, reference_date=None, base_values=None):
     return resolved
 
 
-def resolve_score_effective(score_names, reference_date=None, base_values=None):
+def resolve_score_effective(score_names, reference_date=None, base_values=None, include_future=False):
     """Như resolve_score_values nhưng kèm ngày áp dụng & tên đợt đang có hiệu lực.
 
     Trả về dict name -> {"value", "effective_date", "version_label"}.
     Lựa chọn chưa có đợt nào: effective_date = None, version_label = None.
+
+    `include_future=True`: bỏ giới hạn <= reference_date, lấy đợt có ngày áp dụng
+    lớn nhất kể cả đợt trong tương lai — dùng cho trang cấu hình để người quản trị
+    thấy ngay đợt vừa đặt lịch. Màn hình ghi sổ KHÔNG dùng cờ này.
     """
     names = [n for n in set(score_names or []) if n]
     if not names:
@@ -106,10 +110,13 @@ def resolve_score_effective(score_names, reference_date=None, base_values=None):
     if not frappe.db.table_exists(DOCTYPE):
         return result
 
-    ref = _parse_reference_date(reference_date)
+    version_filters = {"class_log_score": ["in", names]}
+    if not include_future:
+        version_filters["effective_date"] = ["<=", _parse_reference_date(reference_date)]
+
     for v in frappe.get_all(
         DOCTYPE,
-        filters={"class_log_score": ["in", names], "effective_date": ["<=", ref]},
+        filters=version_filters,
         fields=["class_log_score", "value", "effective_date", "label"],
         order_by="effective_date asc, modified asc",
         limit_page_length=0,
@@ -124,12 +131,16 @@ def resolve_score_effective(score_names, reference_date=None, base_values=None):
     return result
 
 
-def apply_versions_to_rows(rows, reference_date=None, name_field="name", value_field="value"):
+def apply_versions_to_rows(
+    rows, reference_date=None, name_field="name", value_field="value", include_future=False
+):
     """Ghi đè `value` + gắn `effective_date`/`version_label` của đợt đang có hiệu lực."""
     if not rows:
         return rows
     base = {r.get(name_field): r.get(value_field) for r in rows if r.get(name_field)}
-    resolved = resolve_score_effective(base.keys(), reference_date, base_values=base)
+    resolved = resolve_score_effective(
+        base.keys(), reference_date, base_values=base, include_future=include_future
+    )
     for r in rows:
         info = resolved.get(r.get(name_field))
         if not info:

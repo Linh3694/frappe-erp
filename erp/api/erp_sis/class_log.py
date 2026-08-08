@@ -447,7 +447,7 @@ def _pick_subject_title_for_classlog_row(subject_log, timetable_subject_map, per
 
 
 @frappe.whitelist(allow_guest=False)
-def get_class_log_options(education_stage=None, reference_date=None, include_inactive=None):
+def get_class_log_options(education_stage=None, reference_date=None, include_inactive=None, include_future=None):
     """Get class log options (master data)
 
     `value` trả về là giá trị có hiệu lực tại `reference_date` (mặc định hôm nay)
@@ -455,6 +455,9 @@ def get_class_log_options(education_stage=None, reference_date=None, include_ina
 
     `include_inactive=1` trả cả lựa chọn đã tắt (chỉ dùng cho trang cấu hình);
     mặc định chỉ trả lựa chọn đang bật để màn hình ghi sổ không thấy mục đã tắt.
+
+    `include_future=1` lấy đợt điểm có ngày áp dụng lớn nhất kể cả đợt trong tương lai
+    (trang cấu hình). Mặc định chỉ lấy đợt đã có hiệu lực tại `reference_date`.
 
     ⚡ Performance: Cached for 30 minutes (shared cache - master data)
     """
@@ -466,9 +469,12 @@ def get_class_log_options(education_stage=None, reference_date=None, include_ina
                 reference_date = frappe.request.args.get('reference_date')
             if include_inactive is None:
                 include_inactive = frappe.request.args.get('include_inactive')
+            if include_future is None:
+                include_future = frappe.request.args.get('include_future')
 
         reference_date = _parse_score_reference_date(reference_date)
         include_inactive = str(include_inactive or "").lower() in ("1", "true", "yes")
+        include_future = str(include_future or "").lower() in ("1", "true", "yes")
 
         filters = {} if include_inactive else {"is_active": 1}
         if education_stage:
@@ -480,6 +486,7 @@ def get_class_log_options(education_stage=None, reference_date=None, include_ina
         cache_key = (
             f"class_log_options:v3:{education_stage or 'all'}:{reference_date}"
             f":{'all' if include_inactive else 'active'}"
+            f":{'future' if include_future else 'now'}"
         )
 
         try:
@@ -506,8 +513,8 @@ def get_class_log_options(education_stage=None, reference_date=None, include_ina
             order_by="type asc, value desc, title_vn asc"
         )
 
-        # Ghi đè value theo phiên bản điểm có hiệu lực tại reference_date
-        apply_versions_to_rows(rows, reference_date)
+        # Ghi đè value theo đợt điểm có hiệu lực tại reference_date
+        apply_versions_to_rows(rows, reference_date, include_future=include_future)
         rows.sort(key=lambda r: ((r.get('type') or ''), -float(r.get('value') or 0), (r.get('title_vn') or '')))
 
         grouped = {"homeroom": [], "homework": [], "behavior": [], "participation": [], "issue": [], "top_performance": []}
